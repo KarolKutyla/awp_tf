@@ -7,5 +7,9 @@ setup(
     install_requires=[
         "tensorflow",
         "adversarial-robustness-toolbox",
+        "keras-hub",
+        "keras-cv",
+        "torch",
+        "torchvision"
     ],
 )

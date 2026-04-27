@@ -1,10 +1,9 @@
-from typing import Optional
+from typing import Any
 
 import tensorflow as tf
 from tensorflow import keras
 
-from neural_network_analytic_tool.art_tf.losses.loss import AdversarialAttackLoss
-from attack import TensorflowEvasionAttack
+from attacks.attack import TensorflowEvasionAttack
 
 
 def get_default_params() -> dict:
@@ -19,21 +18,19 @@ class PGDAttack(TensorflowEvasionAttack):
     def __init__(
             self,
             model: keras.Model,
-            adversarial_loss: AdversarialAttackLoss,
-            params: Optional[dict[str: object]] = None
+            params: dict[str, object] | Any = None
     ):
-        super().__init__()
-        self._model: keras.Model = model
-        self._adversarial_loss: AdversarialAttackLoss = adversarial_loss
+        super().__init__(model)
+        self._forced_type = tf.float32
 
         params = _set_params(params)
-        self._perturbation_bound = params['perturbation_bound']
-        self._pgd_step = params['pgd_step']
-        self._pgd_step_size = params['pgd_step_size']
+        self._perturbation_bound: float = tf.cast(params['perturbation_bound'], self._forced_type)
+        self._pgd_step: int = params['pgd_step']
+        self._pgd_step_size: float = tf.cast(params['pgd_step_size'], self._forced_type)
 
     @tf.function
     def generate_attack(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
-        random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=tf.float32)
+        random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=self._forced_type)
         pert = random_sample * self._perturbation_bound
         x_adv = pert + x_batch
         for i in range(self._pgd_step):
@@ -41,22 +38,26 @@ class PGDAttack(TensorflowEvasionAttack):
         return x_adv
 
     @tf.function
-    def _pgd_iteration(self, x, x_adv, y):
+    def _pgd_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
         with tf.GradientTape() as tape:
             tape.watch(x_adv)
-            adversarial_loss = self._adversarial_loss.calculate(x, y, x_adv)
-        gradient = tape.gradient(adversarial_loss, x_adv)
-        pert = (x_adv - x) + gradient * self._pgd_step_size
-        pert = tf.map_fn(fn=self._trim_pert_to_bound, elems=pert)
-        return x + pert
+            logits = self.model(x_adv, training=False)
+            loss = tf.keras.losses.sparse_categorical_crossentropy(y, logits)
+            loss = tf.reduce_mean(loss)
+        gradient = tape.gradient(loss, x_adv)
+        x_adv = x_adv + tf.sign(gradient) * self._pgd_step_size
+        perturbation = x_adv - x
+        perturbation = tf.clip_by_value(
+            perturbation,
+            -self._perturbation_bound,
+            self._perturbation_bound
+        )
+        x_adv = x + perturbation
+        x_adv = tf.clip_by_value(x_adv, 0.0, 1.0)
+        return x_adv
 
-    @tf.function
-    def _trim_pert_to_bound(self, t):
-        norm = tf.norm(t)
-        return tf.cond(norm > self._perturbation_bound, lambda: t * self._perturbation_bound / norm, lambda: t)
 
-
-def _set_params(training_params: Optional[dict[str: object]]) -> dict[str: object]:
+def _set_params(training_params: dict[str, Any] | Any) -> dict[str, Any]:
     if training_params is None:
         return get_default_params()
     else:

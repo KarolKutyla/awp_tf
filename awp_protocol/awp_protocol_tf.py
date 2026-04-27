@@ -1,32 +1,26 @@
-from typing import Optional
+from typing import Optional, Any, NamedTuple
+from dataclasses import dataclass, replace
 
 import tensorflow as tf
+from sympy import false
 from tensorflow import keras
-from tensorflow.python.eager.def_function import Function as TfFunction
-import numpy as np
 
-
-from tensorflow.python.types.core import GenericFunction
-
-from awp_protocol.attacks import TensorflowEvasionAttack
+from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.attacks.pgd import PGDAttack
 from awp_protocol.losses.trades_loss import TradesLoss
-from awp_proxy import AWPProxyClassifier
+from awp_proxy import AWPProxyCalculations
 
-from neural_network_analytic_tool.art_tf.losses.loss import AdversarialAttackLoss
-from neural_network_analytic_tool.art_tf.losses.loss_context import LossContext
-from neural_network_analytic_tool.art_tf.losses import trades_loss, adversarial_categorical_cross_entropy
+from awp_protocol.losses.loss import AdversarialLoss
+from awp_protocol.losses.loss_context import LossContext
+from awp_protocol.losses import trades_loss, adversarial_categorical_cross_entropy
 
-
-def get_default_params() -> dict:
-    return {
-        'weight_constraint': 0.01,
-        'alternate_iteration': 1,
-        'learning_rate': 0.01,
-        'awp_steps': 10,
-        "awp_step_size": 0.1,
-        "mode": "trades"
-    }
+@dataclass(frozen=True)
+class AWPProtocolParams:
+    alternate_iteration: int = 1
+    learning_rate: float = 0.01
+    awp_steps: int = 10
+    mode: str = "trades"
+    use_optimizer: bool = False
 
 
 class AWPProtocolTF:
@@ -35,34 +29,28 @@ class AWPProtocolTF:
     def __init__(
             self,
             classifier: keras.Model,
-            attack: Optional[TensorflowEvasionAttack] = None,
-            optimizer: Optional[keras.optimizers.Optimizer] = None,
-            tracked_layers: list[bool] | None = None,
-            params_dict: Optional[dict] = None
+            proxy_classifier: AWPProxyCalculations,
+            attack: TensorflowEvasionAttack | None = None,
+            optimizer: keras.optimizers.Optimizer | None = None,
+            params: AWPProtocolParams | None = None,
+            **overrides
     ):
-        params_dict = _set_params(params_dict)
+        self._params = params or AWPProtocolParams()
+        self._params = replace(self._params, **overrides)
         self._classifier = classifier
-        self._loss = _select_adversarial_loss_from_params(params_dict)
+        self._proxy_classifier: AWPProxyCalculations = proxy_classifier
+            #AWPProxyClassifier(self._classifier, tracked_layers, params_dict['weight_constraint']))
+
+        self._loss = _select_adversarial_loss_from_params(self._params)
         self._trades_beta = 0.1
 
         self._attack: TensorflowEvasionAttack = _set_attack(attack, classifier)
 
-        self._learning_rate = params_dict["learning_rate"]
-        self._optimizer: tf.optimizers.Optimizer = optimizer
-        self._weight_constraint = params_dict["weight_constraint"]
-        self._alternate_iteration = params_dict["alternate_iteration"]
-        self._awp_steps = params_dict["awp_steps"]
-        self._awp_step_size = _select_awp_step_size(params_dict)
+        self._learning_rate: float = self._params.learning_rate
+        self._optimizer: tf.optimizers.Optimizer | None = optimizer if optimizer is not None and self._params.use_optimizer else None
 
-        self._perturbed_layers = _select_perturbed_layers(self._classifier, tracked_layers)
-        self._weight_perturbations = _create_storage_for_calculated_perturbations(self._classifier)
-        self._weight_norms = [tf.Variable(tf.norm(variables)) if tracked else None for variables, tracked in
-                              zip(self._classifier.trainable_variables, self._perturbed_layers)]
-        self._weight_perturbation_sizes = [tf.Variable(weight_size * self._weight_constraint) if tracked else None
-                                           for weight_size, tracked in
-                                           zip(self._weight_norms, self._perturbed_layers)]
-        self._proxy_classifier: AWPProxyClassifier = \
-            AWPProxyClassifier(self._classifier, tracked_layers, params_dict['weight_constraint'])
+        self._alternate_iteration = self._params.alternate_iteration
+        self._awp_steps = self._params.awp_steps
 
     def batch_process_metrics(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
         result = self.batch_process(x_batch, y_batch)
@@ -78,7 +66,7 @@ class AWPProtocolTF:
         return loss_adv, accuracy, batch_size
 
     @tf.function
-    def batch_process(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> dict:
+    def batch_process(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> LossContext:
         self._proxy_classifier.copy_originator_state(self._classifier)
         x_pert = x_batch
         for a in range(self._alternate_iteration):
@@ -89,7 +77,7 @@ class AWPProtocolTF:
             ctx = self._feed_proxy(x_batch, y_batch, x_pert)
             loss = self._loss.calculate(ctx)
 
-        gradient = tape.gradient(loss, self._proxy_classifier.get_trainable_variables())
+        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
         self._update_classifier(gradient)
         return ctx
 
@@ -99,18 +87,25 @@ class AWPProtocolTF:
             self._weight_perturbation_step(x_batch, y_batch, x_pert)
 
     @tf.function
-    def _weight_perturbation_step(self, x_batch, y_batch, x_pert):
+    def _weight_perturbation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
         with tf.GradientTape() as tape:
             result = self._feed_proxy(x_batch, y_batch, x_pert)
             loss = self._loss.calculate(result)
-        gradient = tape.gradient(loss, self._proxy_classifier.get_trainable_variables())
-        self._proxy_classifier.calculate_and_apply_weight_perturbations(gradient, self._classifier)
+        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
+        self._proxy_classifier.calculate_and_store_weight_perturbation(gradient)
+        self._proxy_classifier.apply_stored_weight_perturbation(self._classifier)
 
     @tf.function
     def _feed_proxy(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
         logits = self._proxy_classifier.forward_pass(x_batch)
         logits_adv = self._proxy_classifier.forward_pass(x_pert)
-        ctx = LossContext(x_batch, x_pert, logits, logits_adv, y_batch)
+        ctx = LossContext(
+            x_batch=x_batch,
+            x_pert=x_pert,
+            y_true=y_batch,
+            logits_out=logits,
+            logits_pert=logits_adv
+        )
         return ctx
 
     @tf.function
@@ -128,28 +123,11 @@ class AWPProtocolTF:
                     gradient = tf.zeros_like(variable)
                 variable.assign_sub(self._learning_rate * gradient)
 
-
-def _set_params(training_params: Optional[dict]) -> dict:
-    if training_params is None:
-        return get_default_params()
-    else:
-        params_dict = get_default_params()
-        params_dict.update(training_params)
-        return params_dict
-
-
-def _select_perturbed_layers(classifier, tracked_layers) -> list[bool]:
-    if tracked_layers is None:
-        return ['kernel' in variable.name for variable in classifier.trainable_variables]
-    else:
-        return tracked_layers
-
-
 def _create_storage_for_calculated_perturbations(classifier: keras.models.Model):
     return [tf.Variable(tf.zeros_like(variable), trainable=False) for variable in classifier.trainable_weights]
 
 
-def _select_awp_step_size(params_dict: dict[str: object]):
+def _select_awp_step_size(params_dict: dict[str, object]):
     if params_dict["awp_step_size"] is None:
         return params_dict['weight_constraint'] / (params_dict['awp_steps'] * params_dict['alternate_iteration'])
     else:
@@ -173,10 +151,10 @@ def _set_attack(attack: Optional[TensorflowEvasionAttack], model: keras.Model) -
         return attack
 
 
-def _select_adversarial_loss_from_params(params_dict) -> AdversarialAttackLoss:
-    if params_dict["mode"] == "pgd":
-        return adversarial_categorical_cross_entropy.AdversarialCategoricalCrossEntropy()
-    elif params_dict["mode"] == "trades":
+def _select_adversarial_loss_from_params(params: AWPProtocolParams) -> AdversarialLoss:
+    if params.mode == "pgd":
+        return adversarial_categorical_cross_entropy.AdversarialSparseCategoricalCrossEntropy()
+    elif params.mode == "trades":
         return trades_loss.TradesLoss()
     else:
         raise Exception("Mode not provided! Chose pgd or trades.")

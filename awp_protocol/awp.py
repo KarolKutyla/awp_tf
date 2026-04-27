@@ -21,13 +21,11 @@ This is a TensorFlow implementation of the Adversarial Weight Perturbation (AWP)
 | Paper link: https://proceedings.neurips.cc/paper/2020/file/1ef91c212e30e14bf125e9374262401f-Paper.pdf
 """
 from __future__ import absolute_import, division, print_function, unicode_literals, annotations
+from dataclasses import dataclass, replace
 
-import copy
 import logging
 import time
-from typing import TYPE_CHECKING
 
-from collections import OrderedDict
 import numpy as np
 from tqdm.auto import trange
 
@@ -36,17 +34,20 @@ from art.estimators.classification.tensorflow import TensorFlowV2Classifier
 from art.data_generators import DataGenerator
 from art.attacks.attack import EvasionAttack
 from art.utils import check_and_transform_label_format
-from tensorflow.data import Dataset
+
 import tensorflow as tf
-from neural_network_analytic_tool.art_tf.awp_protocol_tf import AWPProtocolTF
-from tensorflow import keras
-from keras.callbacks import Callback
-from art.utils import projection
+from tensorflow.keras.callbacks import Callback
+
+from awp_protocol import awp_protocol_tf, awp_proxy
+from awp_protocol.attacks import pgd
+from awp_protocol.attacks.attack import TensorflowEvasionAttack
 
 logger = logging.getLogger(__name__)
-EPS = 1e-8  # small value required for avoiding division by zero and for KLDivLoss to make probability vector non-zero
-EPS_2 = 32 / 255
 
+@dataclass(frozen=True)
+class AWPParams:
+    protocol_params = awp_protocol_tf.AWPProtocolParams()
+    awp_params = awp_proxy.AWPProxyParams()
 
 class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
     """
@@ -59,11 +60,11 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             self,
             classifier: TensorFlowV2Classifier,
             proxy_classifier: TensorFlowV2Classifier,
-            attack: EvasionAttack | None,
-            mode: str,
-            gamma: float,
-            beta: float,
-            warmup: int,
+            attack: TensorflowEvasionAttack,
+            warmup: int = 0,
+            trained_layers: tuple[bool, ...] | None = None,
+            params: AWPParams | None = None,
+            **overrides
     ):
         """
         Create an :class:`.AdversarialTrainerAWPPyTorch` instance.
@@ -77,15 +78,15 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         :param beta: The scaling factor controlling tradeoff between clean loss and adversarial loss for TRADES protocol
         :param warmup: The number of epochs after which weight perturbation is applied
         """
-        super().__init__(classifier, proxy_classifier, attack, mode, gamma, beta, warmup)
-        self._classifier: TensorFlowV2Classifier
-        self._proxy_classifier: TensorFlowV2Classifier
-        self._attack: EvasionAttack
-        self._mode: str
-        self.gamma: float
-        self._beta: float
+        super().__init__(classifier, proxy_classifier, None, None, None, None, warmup)
+        self._classifier: TensorFlowV2Classifier = classifier
+        self._proxy_classifier: TensorFlowV2Classifier = proxy_classifier
+        self._attack: EvasionAttack = attack
         self._warmup: int
         self._apply_wp: bool
+        self._tracked_layers: tuple[bool, ...] | None = trained_layers
+        self._params = params or AWPParams()
+        self._params = replace(self._params, **overrides)
 
     def fit(
             self,
@@ -93,8 +94,8 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             y: np.ndarray,
             validation_data: tuple[np.ndarray, np.ndarray] | None = None,
             batch_size: int = 128,
-            nb_epochs: int = 20,
-            callbacks: list[Callback] = [],
+            nb_epochs: int = 1,
+            callbacks: list[Callback] | None = None,
             **kwargs,
     ):
         """
@@ -123,8 +124,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         y = check_and_transform_label_format(y, nb_classes=self.classifier.nb_classes)
         # adversarial_perturbed_weights = self.AWPProtocolTF(self._classifier, self._classifier.loss_object,
         #                                                    attack=self._attack, optimizer=self._classifier.optimizer)
-        awp_protocol_loop_tf = AWPProtocolTF(self._classifier.model, self._classifier.loss_object, optimizer=self._classifier.optimizer, attack=self._attack)
-
+        awp_protocol_loop_tf = self._init_training_object()
         for i_epoch in trange(nb_epochs, desc=f"Adversarial Training AWP with {self._mode} - Epochs"):
             for callback in callbacks:
                 callback.on_epoch_begin(i_epoch)
@@ -145,7 +145,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
                 x_batch = x[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]].copy()
                 y_batch = y[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]]
 
-                _train_loss, _train_acc, _train_n = self._batch_process(x_batch, y_batch, awp_protocol_loop_tf)
+                _train_loss, _train_acc, _train_n = awp_protocol_tf._batch_process(x_batch, y_batch, awp_protocol_loop_tf)
 
                 train_loss += _train_loss
                 train_acc += _train_acc
@@ -209,21 +209,20 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             callback.on_train_end(logs)
 
     def _transform_dataset(self, dataset: tf.data.Dataset, nb_classes: int, apply_fit: bool):
-        from copy import copy
         def check_transform_and_preprocess(x, y):
-            y = check_and_transform_label_format(y, nb_classes)
+            y = tf.squeeze(y)
+            y = tf.cast(y, tf.int32)
             x, y = self._classifier._apply_preprocessing(x, y, fit=apply_fit)
             return x, y
-        transformed_dataset = copy(dataset)
-        transformed_dataset.map(check_transform_and_preprocess)
+        transformed_dataset = dataset.map(check_transform_and_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
         return transformed_dataset
 
     def fit_dataset(self,
-            train_dataset: Dataset,
-            validation_dataset: Dataset | None = None,
-            nb_epochs: int = 20,
-            callbacks: list[Callback] = [],
-            **kwargs,):
+            train_dataset: tf.data.Dataset,
+            validation_dataset: tf.data.Dataset | None = None,
+            nb_epochs: int = 1,
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            **kwargs):
 
         """
                 Train model with AWP protocol.
@@ -240,134 +239,71 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
                 """
 
         logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
-        nb_batches = tf.data.experimental.cardinality(train_dataset).numpy()
         train_dataset = self._transform_dataset(train_dataset, self.classifier.nb_classes, apply_fit=True)
         if validation_dataset is not None:
             validation_dataset = self._transform_dataset(validation_dataset, self.classifier.nb_classes, apply_fit=False)
 
-        for callback in callbacks:
-            params = {"steps": nb_batches, "epochs": nb_epochs}
-            callback.set_model(self.classifier)
-            callback.set_params(params)
-            callback.on_train_begin()
-
-        best_acc_adv_test = 0
+        callbacks = callbacks or []
+        callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier)
+        callback_list.on_train_begin()
 
         logger.info("Adversarial Training AWP with %s", self._mode)
-        adversarial_perturbed_weights = AWPProtocolTF(self._classifier.model, self._classifier.loss_object,
-                                                           optimizer=self._classifier.optimizer, attack=self._attack)
+        trainer = self._init_training_object()
 
         for i_epoch in trange(nb_epochs, desc=f"Adversarial Training AWP with {self._mode} - Epochs"):
-            for callback in callbacks:
-                callback.on_epoch_begin(i_epoch)
+            callback_list.on_epoch_begin(i_epoch)
             if i_epoch >= self._warmup:
                 self._apply_wp = True
 
-            # Shuffle the examples
             start_time = time.time()
-            train_loss = 0.0
-            train_acc = 0.0
-            train_n = 0.0
 
-            for batch_id, batch in enumerate(train_dataset.as_numpy_iterator()):
-                # Create batch data
-                for callback in callbacks:
-                    callback.on_batch_begin(batch_id)
+            for step, (x_batch, y_batch) in enumerate(train_dataset):
+                # callback_list.on_batch_begin(step)
+                params = trainer.batch_process(x_batch, y_batch)
+                # callback_list.on_batch_end(step, logs=params)
 
-                x_batch = batch[0].copy()
-                y_batch = batch[1]
+            self.run_validation(validation_dataset)
+            callback_list.on_epoch_end(i_epoch)
 
-                _train_loss, _train_acc, _train_n = self._batch_process(x_batch, y_batch, adversarial_perturbed_weights)
+        callback_list.on_train_end()
 
-                train_loss += _train_loss
-                train_acc += _train_acc
-                train_n += _train_n
+    def run_validation(self, validation_dataset):
+        if validation_dataset is None:
+            return {}
 
-                for callback in callbacks:
-                    logs = {"loss": _train_loss, "acc": _train_acc}
-                    callback.on_batch_end(i_epoch, logs)
+        clean_loss = tf.keras.metrics.Mean()
+        adv_loss = tf.keras.metrics.Mean()
 
-            train_time = time.time()
-            # compute accuracy
-            if validation_dataset is not None:
-                sum_batches = 0
-                normal_loss_sum = 0.0
-                adv_loss_sum = 0.0
-                labels_list = []
-                labels_clean_list = []
-                labels_adv_list = []
-                for batch_id, batch in enumerate(validation_dataset.as_numpy_iterator()):
-                    x_batch = batch[0].copy()
-                    batch_size = tf.shape(x_batch)[0]
-                    y_batch = batch[1]
-                    labels_list.append(y_batch)
+        clean_acc = tf.keras.metrics.SparseCategoricalAccuracy()
+        adv_acc = tf.keras.metrics.SparseCategoricalAccuracy()
 
-                    y_pred = self.predict(x_batch, batch_size=batch_size)
-                    labels_clean_list.append(y_pred)
-                    loss = self.classifier.loss_object(y_batch, y_pred)
-                    normal_loss_sum += loss * tf.cast(batch_size, tf.float32)
+        validation_dataset = validation_dataset.prefetch(tf.data.AUTOTUNE)
 
-                    x_adv = self._attack.generate(x_batch, y_batch)
-                    y_adv_pred = self.predict(x_adv, batch_size=batch_size)
-                    labels_adv_list.append(y_adv_pred)
-                    loss_adv = self.classifier.loss_object(y_batch, y_adv_pred)
-                    adv_loss_sum += loss_adv * tf.cast(batch_size, tf.float32)
+        for x_batch, y_batch in validation_dataset:
+            y_pred = self.classifier.model(x_batch, training=False)
+            loss_clean = tf.reduce_mean(self.classifier.model.loss_object(y_batch, y_pred))
 
-                    sum_batches += batch_size
+            clean_loss.update_state(loss_clean)
+            clean_acc.update_state(y_batch, y_pred)
 
-                normal_loss_avg = normal_loss_sum / tf.cast(sum_batches, tf.float32)
-                adv_loss_avg = adv_loss_sum / tf.cast(sum_batches, tf.float32)
-                labels = tf.concat(labels_list, axis=0)
-                labels_clean = tf.concat(labels_clean_list, axis=0)
-                labels_adv = tf.concat(labels_adv_list, axis=0)
-                clean_acc = np.sum(np.argmax(labels_clean, axis=1) == np.argmax(labels, axis=1))/sum_batches
-                adv_acc = np.sum(np.argmax(labels_clean, axis=1) == np.argmax(labels_adv, axis=1))/sum_batches
+            # -----------------------
+            # ADVERSARIAL
+            # -----------------------
+            x_adv = self._attack.generate_attack(x_batch, y_batch)
 
-                print("Clean loss: ", normal_loss_avg)
-                print("Adv loss:", adv_loss_avg)
-                print("Clean acc: ", clean_acc)
-                print("Adv acc: ", adv_acc)
+            y_adv_pred = self.classifier.model(x_adv, training=False)
 
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv (tr): %.4f acc-clean (val): %.4f acc-adv (val): %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                    clean_acc,
-                    adv_acc,
-                )
+            loss_adv = tf.reduce_mean(self.classifier.model.loss_object(y_batch, y_adv_pred))
 
-                # # save last checkpoint
-                # if i_epoch + 1 == nb_epochs:
-                #     self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_{i_epoch}")
-                #
-                # # save best checkpoint
-                # if adv_acc > best_acc_adv_test:
-                #     self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_best")
-                #     best_acc_adv_test = adv_acc
+            adv_loss.update_state(loss_adv)
+            adv_acc.update_state(y_batch, y_adv_pred)
 
-            else:
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv: %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                )
-            for callback in callbacks:
-                logs = {"loss": train_loss / train_n, "accuracy": train_acc / train_n}
-                if validation_dataset is not None:
-                    logs["val_loss"] = normal_loss_avg
-                    logs["val_accuracy"] = clean_acc
-                    logs["adv_val_loss"] = adv_loss_avg
-                    logs['adv_val_accuracy'] = adv_acc
-                callback.on_epoch_end(i_epoch, logs)
-
-        for callback in callbacks:
-            logs = {"loss": train_loss / train_n, "acc": train_acc / train_n}
-            callback.on_train_end(logs)
-
+        return {
+            "val_loss": clean_loss.result(),
+            "val_adv_loss": adv_loss.result(),
+            "val_acc": clean_acc.result(),
+            "val_adv_acc": adv_acc.result(),
+        }
 
     def fit_generator(
             self,
@@ -562,9 +498,25 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         train_time = time.time()
         return train_time - start_time, train_loss / train_n, train_acc / train_n
 
-    def _batch_process(self, x_batch: np.ndarray, y_batch: np.ndarray, adversarial_perturbed_weights: AWPProtocolTF) -> \
-            tuple[float, float, float]:
+    def _init_training_object(self):
+        attack = pgd.PGDAttack(self.classifier.model)
+        return awp_protocol_tf.AWPProtocolTF(
+            self._classifier.model,
+            self._create_proxy_calculation_object(),
+            attack,
+            self._classifier.optimizer,
+            self._params.protocol_params)
 
-        train_loss, train_acc, train_n = adversarial_perturbed_weights.awp_step(x_batch, y_batch)
-        # train_acc = keras.metrics.categorical_accuracy(o_batch, model_outputs_pert)
-        return tf.get_static_value(train_loss), tf.get_static_value(train_acc), tf.get_static_value(train_n)
+    def _create_proxy_calculation_object(self) -> awp_protocol_tf.AWPProxyCalculations:
+        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
+        return awp_protocol_tf.AWPProxyCalculations(self._proxy_classifier.model, tracked_layers, self._params.awp_params)
+
+
+
+def clone_classifier(originator: tf.keras.Model) -> tf.keras.Model:
+    proxy_classifier = tf.keras.models.clone_model(originator)
+    proxy_classifier.set_weights(originator.get_weights())
+    return proxy_classifier
+
+def select_default_trained_layers_tf(classifier) -> tuple[bool, ...]:
+        return tuple('kernel' in variable.name for variable in classifier.trainable_variables)
