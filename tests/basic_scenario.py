@@ -3,6 +3,7 @@ from art.attacks.evasion import ProjectedGradientDescentTensorFlowV2
 
 import numpy as np
 from tensorflow import keras
+from tensorflow.python.profiler.profiler_v2 import warmup
 
 from actions import models, datasets, attacks
 
@@ -13,13 +14,11 @@ tensorflow.config.run_functions_eagerly(False)
 
 train_ds, x_test, y_test, _, _ = datasets.load_dataset()
 model = models.load_tensorflow_resnet()
-print(model)
 
 pgd_params = pgd.get_default_params()
 pgd_attack = pgd.PGDAttack(model, pgd_params)
 
 x_batch, y_batch = next(iter(train_ds))
-print(x_batch)
 x_adv = pgd_attack.generate_attack(x_batch, y_batch)
 
 tf_evaluation_clean = model.evaluate(x_batch, y_batch)
@@ -46,5 +45,5 @@ tfv2_classifier_proxy = awp.TensorFlowV2Classifier(proxy_model, 10, input_shape=
 
 attack = pgd.PGDAttack(proxy_model)
 
-trainer = awp.AdversarialTrainerAWPTensorflow(tfv2_classifier, tfv2_classifier_proxy, attack)
+trainer = awp.AdversarialTrainerAWPTensorflow(tfv2_classifier, tfv2_classifier_proxy, attack, warmup=2)
 trainer.fit_dataset(train_ds)

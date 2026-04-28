@@ -24,7 +24,6 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 from dataclasses import dataclass, replace
 
 import logging
-import time
 
 import numpy as np
 from tqdm.auto import trange
@@ -41,6 +40,7 @@ from tensorflow.keras.callbacks import Callback
 from awp_protocol import awp_protocol_tf, awp_proxy
 from awp_protocol.attacks import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
+from losses.loss_context import LossContext
 
 logger = logging.getLogger(__name__)
 
@@ -112,101 +112,13 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
                                   the target classifier.
         """
 
-        logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
-        for callback in callbacks:
-            callback.on_train_begin()
+        iterator_fn = lambda: self._numpy_to_iterator(x, y, batch_size)
 
-        best_acc_adv_test = 0
-        nb_batches = int(np.ceil(len(x) / batch_size))
-        ind = np.arange(len(x))
+        validation_fn = None
+        if validation_data:
+            validation_fn = lambda: self._validate_dataset(*validation_data)
 
-        logger.info("Adversarial Training AWP with %s", self._mode)
-        y = check_and_transform_label_format(y, nb_classes=self.classifier.nb_classes)
-        # adversarial_perturbed_weights = self.AWPProtocolTF(self._classifier, self._classifier.loss_object,
-        #                                                    attack=self._attack, optimizer=self._classifier.optimizer)
-        awp_protocol_loop_tf = self._init_training_object()
-        for i_epoch in trange(nb_epochs, desc=f"Adversarial Training AWP with {self._mode} - Epochs"):
-            for callback in callbacks:
-                callback.on_epoch_begin(i_epoch)
-            if i_epoch >= self._warmup:
-                self._apply_wp = True
-
-            # Shuffle the examples
-            np.random.shuffle(ind)
-            start_time = time.time()
-            train_loss = 0.0
-            train_acc = 0.0
-            train_n = 0.0
-
-            for batch_id in range(nb_batches):
-                # Create batch data
-                for callback in callbacks:
-                    callback.on_batch_begin(batch_id)
-                x_batch = x[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]].copy()
-                y_batch = y[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]]
-
-                _train_loss, _train_acc, _train_n = awp_protocol_tf._batch_process(x_batch, y_batch, awp_protocol_loop_tf)
-
-                train_loss += _train_loss
-                train_acc += _train_acc
-                train_n += _train_n
-
-                for callback in callbacks:
-                    logs = {"loss": _train_loss, "acc": _train_acc}
-                    callback.on_batch_end(i_epoch, logs)
-
-            train_time = time.time()
-            # compute accuracy
-            if validation_data is not None:
-                (x_test, y_test) = validation_data
-                y_test = check_and_transform_label_format(y_test, nb_classes=self.classifier.nb_classes)
-
-                x_preprocessed_test, y_preprocessed_test = self._classifier._apply_preprocessing(
-                    x_test,
-                    y_test,
-                    fit=True,
-                )
-                # pylint: enable=protected-access
-                output_clean = np.argmax(self.predict(x_preprocessed_test), axis=1)
-                nb_correct_clean = np.sum(output_clean == np.argmax(y_preprocessed_test, axis=1))
-                x_test_adv = self._attack.generate(x_preprocessed_test, y=y_preprocessed_test)
-                output_adv = np.argmax(self.predict(x_test_adv), axis=1)
-                nb_correct_adv = np.sum(output_adv == np.argmax(y_preprocessed_test, axis=1))
-
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv (tr): %.4f acc-clean (val): %.4f acc-adv (val): %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                    nb_correct_clean / x_test.shape[0],
-                    nb_correct_adv / x_test.shape[0],
-                )
-
-                # save last checkpoint
-                if i_epoch + 1 == nb_epochs:
-                    self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_{i_epoch}")
-
-                # save best checkpoint
-                if nb_correct_adv / x_test.shape[0] > best_acc_adv_test:
-                    self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_best")
-                    best_acc_adv_test = nb_correct_adv / x_test.shape[0]
-
-            else:
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv: %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                )
-            for callback in callbacks:
-                logs = {"loss": train_loss, "acc": train_acc}
-                callback.on_epoch_end(i_epoch, logs)
-
-        for callback in callbacks:
-            logs = {"loss": train_loss, "acc": train_acc}
-            callback.on_train_end(logs)
+        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
 
     def _transform_dataset(self, dataset: tf.data.Dataset, nb_classes: int, apply_fit: bool):
         def check_transform_and_preprocess(x, y):
@@ -238,34 +150,15 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
                                           the target classifier.
                 """
 
-        logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
-        train_dataset = self._transform_dataset(train_dataset, self.classifier.nb_classes, apply_fit=True)
-        if validation_dataset is not None:
-            validation_dataset = self._transform_dataset(validation_dataset, self.classifier.nb_classes, apply_fit=False)
+        iterator_fn = lambda: self._dataset_to_iterator(train_dataset)
 
-        callbacks = callbacks or []
-        callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier)
-        callback_list.on_train_begin()
+        validation_fn = None
+        if validation_dataset:
+            validation_dataset = self._transform_dataset(validation_dataset, self.classifier.nb_classes, False)
+            validation_fn = lambda: self.run_validation(validation_dataset)
 
-        logger.info("Adversarial Training AWP with %s", self._mode)
-        trainer = self._init_training_object()
+        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
 
-        for i_epoch in trange(nb_epochs, desc=f"Adversarial Training AWP with {self._mode} - Epochs"):
-            callback_list.on_epoch_begin(i_epoch)
-            if i_epoch >= self._warmup:
-                self._apply_wp = True
-
-            start_time = time.time()
-
-            for step, (x_batch, y_batch) in enumerate(train_dataset):
-                # callback_list.on_batch_begin(step)
-                params = trainer.batch_process(x_batch, y_batch)
-                # callback_list.on_batch_end(step, logs=params)
-
-            self.run_validation(validation_dataset)
-            callback_list.on_epoch_end(i_epoch)
-
-        callback_list.on_train_end()
 
     def run_validation(self, validation_dataset):
         if validation_dataset is None:
@@ -311,6 +204,8 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             validation_data: tuple[np.ndarray, np.ndarray] | None = None,
             nb_epochs: int = 20,
             scheduler: None = None,
+            callbacks: Callback | None = None,
+            warmup: int = 0,
             **kwargs,
     ):
         """
@@ -325,181 +220,105 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
                                   the target classifier.
         """
 
+        nb_batches = int(np.ceil(generator.size / generator.batch_size))
+
+        iterator_fn = lambda: self._generator_to_iterator(generator, nb_batches)
+
+        validation_fn = None
+        if validation_data:
+            validation_fn = lambda: self._validate_dataset(*validation_data)
+
+        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn, warmup=warmup)
+
+    def _train_loop(
+            self,
+            iterator_fn,
+            nb_epochs,
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            validation_fn=None,
+            warmup: int = 0
+    ):
         logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
+        callbacks = callbacks or []
+        callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier.model)
+        logs = {}
 
-        size = generator.size
-        batch_size = generator.batch_size
-        if size is not None:
-            nb_batches = int(np.ceil(size / batch_size))
-        else:
-            raise ValueError("Size is None.")
+        callback_list.on_train_begin()
 
-        logger.info("Adversarial Training AWP with %s", self._mode)
+        trainer = self._init_training_object()
 
-        best_acc_adv_test = 0
-        for i_epoch in trange(nb_epochs, desc=f"Adversarial Training AWP with {self._mode} - Epochs"):
+        for epoch in range(nb_epochs):
+            callback_list.on_epoch_begin(epoch)
 
-            if i_epoch >= self._warmup:
-                self._apply_wp = True
-
-            start_time = time.time()
             train_loss = 0.0
             train_acc = 0.0
             train_n = 0.0
 
-            for _ in range(nb_batches):
-                # Create batch data
-                x_batch, y_batch = generator.get_batch()
-                x_batch = x_batch.copy()
+            for step, (x_batch, y_batch) in enumerate(iterator_fn()):
+                callback_list.on_batch_begin(step)
 
-                _train_loss, _train_acc, _train_n = self._batch_process(x_batch, y_batch)
+                if epoch >= self._warmup:
+                    metrics = trainer.batch_process(x_batch, y_batch)
+                else:
+                    metrics = self.classifier.model.train_step((x_batch, y_batch))
 
-                train_loss += _train_loss
-                train_acc += _train_acc
-                train_n += _train_n
-
-            train_time = time.time()
-
-            # compute accuracy
-            if validation_data is not None:
-                (x_test, y_test) = validation_data
-                y_test = check_and_transform_label_format(y_test, nb_classes=self.classifier.nb_classes)
-
-                x_preprocessed_test, y_preprocessed_test = self._classifier._apply_preprocessing(
-                    x_test,
-                    y_test,
-                    fit=True,
-                )
-                # pylint: enable=protected-access
-                output_clean = np.argmax(self.predict(x_preprocessed_test), axis=1)
-                nb_correct_clean = np.sum(output_clean == np.argmax(y_preprocessed_test, axis=1))
-                x_test_adv = self._attack.generate(x_preprocessed_test, y=y_preprocessed_test)
-                output_adv = np.argmax(self.predict(x_test_adv), axis=1)
-                nb_correct_adv = np.sum(output_adv == np.argmax(y_preprocessed_test, axis=1))
-
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv (tr): %.4f acc-clean (val): %.4f acc-adv (val): %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                    nb_correct_clean / x_test.shape[0],
-                    nb_correct_adv / x_test.shape[0],
-                )
-                # save last checkpoint
-                if i_epoch + 1 == nb_epochs:
-                    self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_{i_epoch}")
-
-                # save best checkpoint
-                if nb_correct_adv / x_test.shape[0] > best_acc_adv_test:
-                    self._classifier.save(filename=f"awp_{self._mode.lower()}_epoch_best")
-                    best_acc_adv_test = nb_correct_adv / x_test.shape[0]
-
-            else:
-                logger.info(
-                    "epoch: %s time(s): %.1f loss: %.4f acc-adv: %.4f",
-                    i_epoch,
-                    train_time - start_time,
-                    train_loss / train_n,
-                    train_acc / train_n,
-                )
-
-    def _validate(
-            self,
-            i_epoch: int,
-            validation_data: list[np.ndarray, np.ndarray] | None = None
-    ):
-        def validation_decorator(func):
-            if validation_data is not None:
-                def wrapper(*args, **kwargs):
-                    (x_test, y_test) = validation_data
-                    y_test = check_and_transform_label_format(y_test, nb_classes=self.classifier.nb_classes)
-                    x_preprocessed_test, y_preprocessed_test = self._classifier._apply_preprocessing(x_test, y_test,
-                                                                                                     fit=True)
-                    train_time, train_loss, train_acc = func(*args, **kwargs)
-                    output = np.argmax(self.predict(x_preprocessed_test), axis=1)
-                    nb_correct_pred = np.sum(output == np.argmax(y_preprocessed_test, axis=1))
-                    logger.info(
-                        "epoch: %s time(s): %.1f loss: %.4f acc(tr): %.4f acc(val): %.4f",
-                        i_epoch,
-                        train_time,
-                        train_loss,
-                        train_acc,
-                        nb_correct_pred / y_preprocessed_test.shape[0],
+                loss = metrics['loss']
+                train_loss += loss
+                if 'ctx' in metrics.keys():
+                    ctx: LossContext = metrics['ctx']
+                    accuracy = tf.reduce_mean(
+                        tf.keras.metrics.sparse_categorical_accuracy(y_batch, ctx.logits_pert)
                     )
-            else:
-                def wrapper(*args, **kwargs):
-                    train_time, train_loss, train_acc = func(*args, **kwargs)
-                    logger.info(
-                        "epoch: %s time(s): %.1f loss: %.4f acc: %.4f",
-                        i_epoch,
-                        train_time,
-                        train_loss,
-                        train_acc
-                    )
-            return wrapper
 
-        return validation_decorator
+                    batch_size = tf.shape(x_batch)[0]
 
-    def _epoch_step_for_dataset(self, x: np.ndarray, y: np.ndarray, batch_size: int, nb_batches: int,
-                                ind: np.ndarray) -> tuple[float, float, float]:
-        """
-        Tracks batch measurements. Data is provided by x, y numpy ndarray.
+                    train_loss += loss * tf.cast(batch_size, tf.float32)
+                    train_acc += accuracy * tf.cast(batch_size, tf.float32)
+                    train_n += tf.cast(batch_size, tf.float32)
 
-        :param x: Batch of x.
-        :param y: Batch of y.
-        :param batch_size: Size of the batch.
-        :param nb_batches: Number of batches.
-        :param ind: Indices of given data. They are shuffled before training on whole batch.
-        :return: Tuple containing processing time, average loss and average accuracy for current epoch.
-        """
-        np.random.shuffle(ind)
-        start_time = time.time()
-        train_loss = 0.0
-        train_acc = 0.0
-        train_n = 0.0
+                    logs = {
+                        "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss,
+                        "acc": float(accuracy.numpy()) if tf.is_tensor(accuracy) else accuracy,
+                    }
+                else:
+                    logs = {
+                        "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss,
+                    }
+                callback_list.on_batch_end(step, logs)
+                print(logs)
 
-        for batch_id in range(nb_batches):
-            x_batch = x[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]].copy()
-            y_batch = y[ind[batch_id * batch_size: min((batch_id + 1) * batch_size, x.shape[0])]]
+            logs = {
+                "loss": train_loss / train_n,
+                "acc": train_acc / train_n
+            }
 
-            _train_loss, _train_acc, _train_n = self._batch_process(x_batch, y_batch)
+            if validation_fn:
+                logs.update(validation_fn())
 
-            train_loss += _train_loss
-            train_acc += _train_acc
-            train_n += _train_n
+            callback_list.on_epoch_end(epoch, logs)
 
-        train_time = time.time()
-        return train_time - start_time, train_loss / train_n, train_acc / train_n
+        callback_list.on_train_end(logs)
 
-    def _epoch_step_for_generator(self, generator: DataGenerator, nb_batches: int) -> tuple[float, float, float]:
-        """
-        Tracks batch measurements.
+    def _dataset_to_iterator(self, dataset):
+        for x_batch, y_batch in dataset:
+            yield x_batch, y_batch
 
-        :param generator: Generator of type DataGenerator.
-        :param nb_batches: Number of batches.
-        :return: Tuple containing processing time, average loss and average accuracy for current epoch.
-        """
-        start_time = time.time()
-        train_loss = 0.0
-        train_acc = 0.0
-        train_n = 0.0
+    def _numpy_to_iterator(self, x, y, batch_size):
+        n = len(x)
+        indices = np.arange(n)
+        np.random.shuffle(indices)
 
-        for batch_id in range(nb_batches):
+        for i in range(0, n, batch_size):
+            batch_idx = indices[i:i + batch_size]
+            yield x[batch_idx], y[batch_idx]
+
+    def _generator_to_iterator(self, generator, nb_batches):
+        for _ in range(nb_batches):
             x_batch, y_batch = generator.get_batch()
-            x_batch = x_batch.copy()
-
-            _train_loss, _train_acc, _train_n = self._batch_process(x_batch, y_batch)
-
-            train_loss += _train_loss
-            train_acc += _train_acc
-            train_n += _train_n
-
-        train_time = time.time()
-        return train_time - start_time, train_loss / train_n, train_acc / train_n
+            yield x_batch, y_batch
 
     def _init_training_object(self):
-        attack = pgd.PGDAttack(self.classifier.model)
+        attack = pgd.PGDAttack(self._proxy_classifier.model)
         return awp_protocol_tf.AWPProtocolTF(
             self._classifier.model,
             self._create_proxy_calculation_object(),
