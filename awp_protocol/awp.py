@@ -25,8 +25,9 @@ from dataclasses import dataclass, replace
 
 import logging
 
+import keras
 import numpy as np
-from tqdm.auto import trange
+from tqdm.auto import tqdm, trange
 
 from art.defences.trainer.adversarial_trainer_awp_pytorch import AdversarialTrainerAWP, AdversarialTrainerAWPPyTorch
 from art.estimators.classification.tensorflow import TensorFlowV2Classifier
@@ -182,7 +183,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             # -----------------------
             # ADVERSARIAL
             # -----------------------
-            x_adv = self._attack.generate_attack(x_batch, y_batch)
+            x_adv = self._attack.generate(x_batch, y_batch)
 
             y_adv_pred = self.classifier.model(x_adv, training=False)
 
@@ -236,7 +237,8 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             nb_epochs,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
             validation_fn=None,
-            warmup: int = 0
+            warmup: int = 0,
+            steps_per_epoch: int | None = None,
     ):
         logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
         callbacks = callbacks or []
@@ -248,56 +250,90 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         trainer = self._init_training_object()
 
         for epoch in range(nb_epochs):
+
             callback_list.on_epoch_begin(epoch)
 
-            train_loss = 0.0
-            train_acc = 0.0
-            train_n = 0.0
+            epoch_logs = {
+            "train_loss": 0.0,
+            "train_acc": 0.0,
+            "train_n": 0.0
+            }
 
-            for step, (x_batch, y_batch) in enumerate(iterator_fn()):
+            iterator = iterator_fn()
+            if hasattr(iterator, "__len__"):
+                total_steps = len(iterator)
+            else:
+                total_steps = steps_per_epoch
+
+            progbar = tf.keras.utils.Progbar(
+                total_steps,
+                stateful_metrics=["loss", "acc"]
+            )
+
+            for step, (x_batch, y_batch) in enumerate(iterator):
+
                 callback_list.on_batch_begin(step)
 
                 if epoch >= self._warmup:
-                    metrics = trainer.batch_process(x_batch, y_batch)
+                    logs = self._adv_step(x_batch, y_batch, trainer, epoch_logs)
                 else:
-                    metrics = self.classifier.model.train_step((x_batch, y_batch))
+                    logs = self._warmup_step(x_batch, y_batch, epoch_logs)
 
-                loss = metrics['loss']
-                train_loss += loss
-                if 'ctx' in metrics.keys():
-                    ctx: LossContext = metrics['ctx']
-                    accuracy = tf.reduce_mean(
-                        tf.keras.metrics.sparse_categorical_accuracy(y_batch, ctx.logits_pert)
-                    )
+                loss = logs["loss"]
+                acc = logs.get("acc", None)
+                values = [("loss", float(loss))]
+                if acc is not None:
+                    values.append(("acc", float(acc)))
+                progbar.update(step + 1, values=values)
 
-                    batch_size = tf.shape(x_batch)[0]
-
-                    train_loss += loss * tf.cast(batch_size, tf.float32)
-                    train_acc += accuracy * tf.cast(batch_size, tf.float32)
-                    train_n += tf.cast(batch_size, tf.float32)
-
-                    logs = {
-                        "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss,
-                        "acc": float(accuracy.numpy()) if tf.is_tensor(accuracy) else accuracy,
-                    }
-                else:
-                    logs = {
-                        "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss,
-                    }
                 callback_list.on_batch_end(step, logs)
-                print(logs)
+
+                # postfix = {"loss": float(logs["loss"])}
+                # if "acc" in logs.keys():
+                #     postfix["acc"] = float(logs["acc"])
+                # pbar.set_postfix(postfix)
 
             logs = {
-                "loss": train_loss / train_n,
-                "acc": train_acc / train_n
+                "loss": epoch_logs["train_loss"] / epoch_logs["train_n"],
+                "acc": epoch_logs["train_acc"] / epoch_logs["train_n"]
             }
 
             if validation_fn:
                 logs.update(validation_fn())
-
             callback_list.on_epoch_end(epoch, logs)
 
         callback_list.on_train_end(logs)
+
+    def _warmup_step(self, x_batch, y_batch, epoch_dict):
+        with tf.GradientTape() as tape:
+            logits = self.classifier.model(x_batch, training=True)
+            loss = self.classifier.model.loss(y_batch, logits)
+        grad = tape.gradient(loss, self.classifier.model.trainable_variables)
+        self.classifier.model.optimizer.apply_gradients(zip(grad, self.classifier.model.trainable_variables))
+        batch_size = tf.shape(x_batch)[0]
+        epoch_dict["train_n"]  += tf.cast(batch_size, tf.float32)
+        return {
+            "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss
+        }
+
+    def _adv_step(self, x_batch, y_batch, trainer, epoch_dict):
+        metrics = trainer.batch_process(x_batch, y_batch)
+        loss = metrics['loss']
+        ctx: LossContext = metrics['ctx']
+        accuracy = tf.reduce_mean(
+            tf.keras.metrics.sparse_categorical_accuracy(y_batch, ctx.logits_pert)
+        )
+
+        batch_size = tf.shape(x_batch)[0]
+
+        epoch_dict["train_loss"] += loss * tf.cast(batch_size, tf.float32)
+        epoch_dict["train_acc"]  += accuracy * tf.cast(batch_size, tf.float32)
+        epoch_dict["train_n"]  += tf.cast(batch_size, tf.float32)
+
+        return {
+            "loss": float(loss.numpy()) if tf.is_tensor(loss) else loss,
+            "acc": float(accuracy.numpy()) if tf.is_tensor(accuracy) else accuracy
+        }
 
     def _dataset_to_iterator(self, dataset):
         for x_batch, y_batch in dataset:

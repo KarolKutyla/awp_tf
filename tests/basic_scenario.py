@@ -11,6 +11,7 @@ from awp_protocol.attacks import pgd
 from awp_protocol import awp
 
 tensorflow.config.run_functions_eagerly(False)
+print(tensorflow.executing_eagerly())
 
 train_ds, x_test, y_test, _, _ = datasets.load_mnist_dataset()
 model = models.load_tensorflow_resnet()
