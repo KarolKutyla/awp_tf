@@ -19,7 +19,7 @@ pgd_params = pgd.get_default_params()
 pgd_attack = pgd.PGDAttack(model, pgd_params)
 
 x_batch, y_batch = next(iter(train_ds))
-x_adv = pgd_attack.generate_attack(x_batch, y_batch)
+x_adv = pgd_attack.generate(x_batch, y_batch)
 
 tf_evaluation_clean = model.evaluate(x_batch, y_batch)
 tf_evaluation_adv = model.evaluate(x_adv, y_batch)

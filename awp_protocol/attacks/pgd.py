@@ -3,7 +3,7 @@ from typing import Any
 import tensorflow as tf
 from tensorflow import keras
 
-from attacks.attack import TensorflowEvasionAttack
+from awp_protocol.attacks.attack import TensorflowEvasionAttack
 
 
 def get_default_params() -> dict:
@@ -29,7 +29,7 @@ class PGDAttack(TensorflowEvasionAttack):
         self._pgd_step_size: float = tf.cast(params['pgd_step_size'], self._forced_type)
 
     @tf.function
-    def generate_attack(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+    def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=self._forced_type)
         pert = random_sample * self._perturbation_bound
         x_adv = pert + x_batch

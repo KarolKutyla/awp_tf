@@ -8,5 +8,5 @@ class TensorflowEvasionAttack(ABC):
         self.model = model
 
     @abstractmethod
-    def generate_attack(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+    def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         ...
