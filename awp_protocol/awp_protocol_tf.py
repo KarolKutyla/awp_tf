@@ -8,7 +8,7 @@ from tensorflow import keras
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.attacks.pgd import PGDAttack
 from awp_protocol.losses.trades_loss import TradesLoss
-from awp_proxy import AWPProxyCalculations
+from awp_protocol.awp_proxy import AWPProxyCalculations
 
 from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
