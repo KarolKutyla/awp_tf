@@ -40,7 +40,7 @@ from tensorflow.keras.callbacks import Callback
 from awp_protocol import awp_protocol_tf, awp_proxy
 from awp_protocol.attacks import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
-from losses.loss_context import LossContext
+from awp_protocol.losses.loss_context import LossContext
 
 logger = logging.getLogger(__name__)
 
