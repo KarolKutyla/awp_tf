@@ -12,7 +12,7 @@ from awp_protocol import awp
 
 tensorflow.config.run_functions_eagerly(False)
 
-train_ds, x_test, y_test, _, _ = datasets.load_dataset()
+train_ds, x_test, y_test, _, _ = datasets.load_mnist_dataset()
 model = models.load_tensorflow_resnet()
 
 pgd_params = pgd.get_default_params()
