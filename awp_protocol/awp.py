@@ -255,34 +255,35 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         self._callback_list.on_epoch_end(self._epochs_run, logs)
         self._epochs_run += 1
 
+
     def _run_batch(self, x_batch, y_batch, step):
         if not self._fast_mode:
             self._callback_list.on_batch_begin(step)
 
         warmup = self._epochs_run < self._warmup
-        loss, logits = self._train_step(x_batch, y_batch, warmup=warmup)
-        self._loss_metric.update_state(loss)
+        self._train_step(x_batch, y_batch, warmup=warmup)
 
         if not self._fast_mode:
-            self._accuracy_metric.update_state(y_batch, logits)
-            if step % 10 == 0:
-                values = [("loss", self._loss_metric.result()), ("accuracy", self._accuracy_metric.result())]
-                self._progbar.update(step + 1, values=values)
-
             self._callback_list.on_batch_end(self._epochs_run, {"loss": self._loss_metric.result()})
 
-        else:
-            if step % 10 == 0:
-                values = [("loss", loss)]
+        if step % 10 == 0:
+            if not self._fast_mode:
+                values = [("loss", self._loss_metric.result()), ("accuracy", self._accuracy_metric.result())]
+                self._progbar.update(step + 1, values=values)
+            else:
+                values = [("loss", self._loss_metric.result())]
                 self._progbar.update(step + 1, values=values)
 
+    @tf.function
     def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool):
         if warmup:
-            return self._warmup_step(x_batch, y_batch)
+            loss, logits =  self._warmup_step(x_batch, y_batch)
         else:
-            return self._trainer.batch_process(x_batch, y_batch)
+            loss, logits =  self._trainer.batch_process(x_batch, y_batch)
+        self._loss_metric.update_state(loss)
+        if not self._fast_mode:
+            self._accuracy_metric.update_state(y_batch, logits)
 
-    @tf.function
     def _warmup_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
         with tf.GradientTape() as tape:
             logits = self.classifier.model(x_batch, training=True)
