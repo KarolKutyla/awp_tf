@@ -46,5 +46,5 @@ tfv2_classifier_proxy = awp.TensorFlowV2Classifier(proxy_model, 10, input_shape=
 
 attack = pgd.PGDAttack(proxy_model)
 
-trainer = awp.AdversarialTrainerAWPTensorflow(tfv2_classifier, tfv2_classifier_proxy, attack, warmup=0)
+trainer = awp.AdversarialTrainerAWPTensorflow(tfv2_classifier, tfv2_classifier_proxy, attack, warmup=2)
 trainer.fit_dataset(train_ds)

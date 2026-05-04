@@ -87,7 +87,7 @@ class AWPProtocolTF:
         }
 
     @tf.function
-    def _batch_process_tf(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> dict:
+    def _batch_process_tf(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
         self._proxy_classifier.copy_originator_state(self._classifier)
         x_pert = x_batch
         for a in range(self._alternate_iteration):
@@ -100,10 +100,8 @@ class AWPProtocolTF:
 
         gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
         self._update_classifier(gradient)
-        return {
-            "loss": loss,
-            "ctx": ctx
-        }
+        return loss, ctx.logits_pert
+
 
     @tf.function
     def _find_weight_perturbation(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
