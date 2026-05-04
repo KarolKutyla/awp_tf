@@ -86,7 +86,7 @@ class AWPProtocolTF:
             "ctx": ctx
         }
 
-    @tf.function
+    # @tf.function
     def _batch_process_tf(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
         self._proxy_classifier.copy_originator_state(self._classifier)
         x_pert = x_batch
@@ -103,12 +103,12 @@ class AWPProtocolTF:
         return loss, ctx.logits_pert
 
 
-    @tf.function
+    # @tf.function
     def _find_weight_perturbation(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
         for j in range(self._awp_steps):
             self._weight_perturbation_step(x_batch, y_batch, x_pert)
 
-    @tf.function
+    # @tf.function
     def _weight_perturbation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
         with tf.GradientTape() as tape:
             result = self._feed_proxy(x_batch, y_batch, x_pert)
@@ -117,7 +117,7 @@ class AWPProtocolTF:
         self._proxy_classifier.calculate_and_store_weight_perturbation(gradient)
         self._proxy_classifier.apply_stored_weight_perturbation(self._classifier)
 
-    @tf.function
+    # @tf.function
     def _feed_proxy(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
         logits = self._proxy_classifier.forward_pass(x_batch)
         logits_adv = self._proxy_classifier.forward_pass(x_pert)
@@ -130,7 +130,7 @@ class AWPProtocolTF:
         )
         return ctx
 
-    @tf.function
+    # @tf.function
     def _update_classifier(self, gradients: list[tf.Tensor]):
         variables = self._classifier.trainable_variables
         if self._optimizer is not None:

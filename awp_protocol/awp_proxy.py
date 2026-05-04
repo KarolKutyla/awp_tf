@@ -38,7 +38,7 @@ class AWPProxyCalculations:
     def trainable_variables(self):
         return self._bound_classifier.trainable_variables
 
-    @tf.function
+    # @tf.function
     def copy_originator_state(self, originator: keras.Model) -> None:
         for i, tracked in enumerate(self._trained_layers):
             self._bound_classifier.trainable_variables[i].assign(
@@ -50,13 +50,13 @@ class AWPProxyCalculations:
                 self._weight_perturbations[i].assign(tf.zeros_like(self._weight_perturbations[i]))
                 self._weight_norms_multiplied_by_step_size[i].assign(self._weight_norms[i].value() * self.step_size)
 
-    @tf.function
+    # @tf.function
     def subtract_perturbations_from_weights(self):
         for i, tracked in enumerate(self._trained_layers):
             if tracked:
                 self._bound_classifier.trainable_variables[i].assign_sub(self._weight_perturbations[i])
 
-    @tf.function
+    # @tf.function
     def calculate_and_store_weight_perturbation(self, gradient: list[tf.Tensor]) -> None:
         for i, tracked in enumerate(self._trained_layers):
             if tracked:
@@ -64,14 +64,14 @@ class AWPProxyCalculations:
                     new_perturbation = self._calculate_single_weight_perturbation(gradient[i], i)
                     self._weight_perturbations[i].assign(new_perturbation)
 
-    @tf.function
+    # @tf.function
     def apply_stored_weight_perturbation(self, originator: keras.Model) -> None:
         for i, tracked in enumerate(self._trained_layers):
             if tracked:
                 self._bound_classifier.trainable_variables[i].assign(
                     originator.trainable_variables[i] + self._weight_perturbations[i])
 
-    @tf.function
+    # @tf.function
     def _calculate_single_weight_perturbation(self, weight_gradient: tf.Tensor, weight_index: int) -> tf.Tensor:
         gradient_norm = tf.norm(weight_gradient)
         non_zero = tf.constant(1e-6, dtype=gradient_norm.dtype)
@@ -82,7 +82,7 @@ class AWPProxyCalculations:
         scaled_weight = self._scale_single_weight_perturbation(new_weight_perturbation, weight_index)
         return scaled_weight
 
-    @tf.function
+    # @tf.function
     def _scale_single_weight_perturbation(self, weight_perturbation: tf.Tensor, weight_index: int) -> tf.Tensor:
         perturbation_norm = tf.norm(weight_perturbation)
         max_norm = self.weight_constraints[weight_index]
@@ -91,7 +91,7 @@ class AWPProxyCalculations:
         scale = tf.minimum(tf.constant(1.0, dtype=scale.dtype), scale)
         return weight_perturbation * scale
 
-    @tf.function
+    # @tf.function
     def forward_pass(self, x_batch: tf.Tensor):
         return self._bound_classifier(x_batch, training=False)
 
