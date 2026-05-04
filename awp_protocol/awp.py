@@ -29,6 +29,8 @@ import time
 
 import keras
 import numpy as np
+from keras.src.metrics import accuracy_metrics
+from tensorflow.python.profiler.profiler_v2 import warmup
 from tqdm.auto import tqdm, trange
 
 from art.defences.trainer.adversarial_trainer_awp_pytorch import AdversarialTrainerAWP, AdversarialTrainerAWPPyTorch
@@ -90,6 +92,14 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         self._tracked_layers: tuple[bool, ...] | None = trained_layers
         self._params = params or AWPParams()
         self._params = replace(self._params, **overrides)
+
+        self._loss_metric = tf.keras.metrics.Mean()
+        self._accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
+        self._steps_per_epoch = None
+        self._epochs_run = 0
+        self._callback_list: tf.keras.callbacks.CallbackList
+        self._progbar: tf.keras.utils.Progbar
+        self._trainer: awp_protocol_tf.AWPProtocolTF
 
     def fit(
             self,
@@ -162,6 +172,120 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
 
         self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
 
+    def fit_generator(
+            self,
+            generator: DataGenerator,
+            validation_data: tuple[np.ndarray, np.ndarray] | None = None,
+            nb_epochs: int = 20,
+            scheduler: None = None,
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            **kwargs,
+    ):
+        """
+        Train model with AWP protocol using a data generator.
+        See class documentation for more information on the exact procedure.
+
+        :param generator: Data generator.
+        :param validation_data: Tuple consisting of validation data, (x_val, y_val)
+        :param nb_epochs: Number of epochs to use for trainings.
+        :param scheduler: Learning rate scheduler to run at the end of every epoch.
+        :param kwargs: Dictionary of framework-specific arguments. These will be passed as such to the `fit` function of
+                                  the target classifier.
+        """
+
+        nb_batches = int(np.ceil(generator.size / generator.batch_size))
+
+        iterator_fn = lambda: self._generator_to_iterator(generator, nb_batches)
+
+        validation_fn = None
+        if validation_data:
+            validation_fn = lambda: self._validate_dataset(*validation_data)
+
+        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
+
+    def _train_loop(
+            self,
+            iterator_fn,
+            nb_epochs,
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            validation_fn=None,
+    ):
+        callbacks = callbacks or []
+        self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier.model)
+        logs = {"loss": None, "accuracy": None}
+        self._callback_list.on_train_begin()
+        self._trainer = self._init_training_object()
+
+        logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
+        for epoch in range(nb_epochs):
+            self._epoch_step(iterator_fn, validation_fn)
+
+        self._callback_list.on_train_end(logs)
+
+    def _epoch_step(self, iterator_fn, validation_fn):
+        self._callback_list.on_epoch_begin(self._epochs_run)
+        self._loss_metric.reset_state()
+        self._accuracy_metric.reset_state()
+
+        iterator = iterator_fn()
+        if hasattr(iterator, "__len__"):
+            total_steps = len(iterator)
+        else:
+            total_steps = self._steps_per_epoch
+
+        self._progbar = tf.keras.utils.Progbar(
+            total_steps,
+            stateful_metrics=["loss", "accuracy"]
+        )
+
+        step = 0
+        for step, (x_batch, y_batch) in enumerate(iterator):
+            self._run_batch(x_batch, y_batch, step)
+
+        if self._steps_per_epoch is None:
+            self._steps_per_epoch = step + 1
+        logs = {
+            "loss": self._loss_metric.result(),
+            "accuracy": self._accuracy_metric.result()
+        }
+        if validation_fn:
+            logs.update(validation_fn())
+        self._callback_list.on_epoch_end(self._epochs_run, logs)
+        self._epochs_run += 1
+
+    def _run_batch(self, x_batch, y_batch, step):
+        self._callback_list.on_batch_begin(step)
+        warmup = self._epochs_run < self._warmup
+        self._train_step(x_batch, y_batch, warmup=warmup)
+        if step % 10 == 0:
+            values = [("loss", self._loss_metric.result()), ("accuracy", self._accuracy_metric.result())]
+            self._progbar.update(step + 1, values=values)
+        self._callback_list.on_batch_end(self._epochs_run, {"loss": self._loss_metric.result()})
+
+    @tf.function
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup):
+        if warmup:
+            loss, logits = self._warmup_step(x_batch, y_batch)
+        else:
+            loss, logits = self._adv_step(x_batch, y_batch)
+        self._loss_metric.update_state(loss)
+        self._accuracy_metric.update_state(y_batch, logits)
+
+    @tf.function
+    def _warmup_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
+        with tf.GradientTape() as tape:
+            logits = self.classifier.model(x_batch, training=True)
+            loss = self.classifier.model.loss(y_batch, logits)
+        grad = tape.gradient(loss, self.classifier.model.trainable_variables)
+        self.classifier.model.optimizer.apply_gradients(zip(grad, self.classifier.model.trainable_variables))
+        return loss, logits
+
+    @tf.function
+    def _adv_step(self, x_batch, y_batch):
+        metrics = self._trainer.batch_process(x_batch, y_batch)
+        loss = metrics['loss']
+        ctx: LossContext = metrics['ctx']
+        return loss, ctx.logits_pert
 
     def run_validation(self, validation_dataset):
         if validation_dataset is None:
@@ -200,132 +324,6 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             "val_acc": clean_acc.result(),
             "val_adv_acc": adv_acc.result(),
         }
-
-    def fit_generator(
-            self,
-            generator: DataGenerator,
-            validation_data: tuple[np.ndarray, np.ndarray] | None = None,
-            nb_epochs: int = 20,
-            scheduler: None = None,
-            callbacks: Callback | None = None,
-            **kwargs,
-    ):
-        """
-        Train model with AWP protocol using a data generator.
-        See class documentation for more information on the exact procedure.
-
-        :param generator: Data generator.
-        :param validation_data: Tuple consisting of validation data, (x_val, y_val)
-        :param nb_epochs: Number of epochs to use for trainings.
-        :param scheduler: Learning rate scheduler to run at the end of every epoch.
-        :param kwargs: Dictionary of framework-specific arguments. These will be passed as such to the `fit` function of
-                                  the target classifier.
-        """
-
-        nb_batches = int(np.ceil(generator.size / generator.batch_size))
-
-        iterator_fn = lambda: self._generator_to_iterator(generator, nb_batches)
-
-        validation_fn = None
-        if validation_data:
-            validation_fn = lambda: self._validate_dataset(*validation_data)
-
-        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
-
-    def _train_loop(
-            self,
-            iterator_fn,
-            nb_epochs,
-            callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            validation_fn=None,
-            steps_per_epoch: int | None = None,
-    ):
-        logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
-        callbacks = callbacks or []
-        callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier.model)
-        logs = {}
-
-        callback_list.on_train_begin()
-
-        trainer = self._init_training_object()
-
-        for epoch in range(nb_epochs):
-
-            callback_list.on_epoch_begin(epoch)
-
-            epoch_logs = {
-            "train_loss": 0.0,
-            "train_acc": 0.0,
-            "train_n": 0.0
-            }
-
-            iterator = iterator_fn()
-            if hasattr(iterator, "__len__"):
-                total_steps = len(iterator)
-            else:
-                total_steps = steps_per_epoch
-
-            progbar = tf.keras.utils.Progbar(
-                total_steps,
-                stateful_metrics=["loss", "acc"]
-            )
-
-            for step, (x_batch, y_batch) in enumerate(iterator):
-
-                callback_list.on_batch_begin(step)
-                t_s = time.time()
-                if epoch >= self._warmup:
-                    loss, batch_size = self._adv_step(x_batch, y_batch, trainer)
-                else:
-                    loss, batch_size = self._warmup_step(x_batch, y_batch)
-                t_e = time.time()
-
-                # print(f"batch_time = {t_e - t_s}")
-
-                values = [("loss", loss)]
-                # if acc is not None:
-                #     values.append(("acc", float(acc)))
-                progbar.update(step + 1, values=values)
-
-                callback_list.on_batch_end(step, logs)
-
-            logs = {
-                "loss": epoch_logs["train_loss"] / epoch_logs["train_n"],
-                "acc": epoch_logs["train_acc"] / epoch_logs["train_n"]
-            }
-
-            if validation_fn:
-                logs.update(validation_fn())
-            callback_list.on_epoch_end(epoch, logs)
-
-        callback_list.on_train_end(logs)
-
-    @tf.function
-    def _warmup_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
-        with tf.GradientTape() as tape:
-            logits = self.classifier.model(x_batch, training=True)
-            loss = self.classifier.model.loss(y_batch, logits)
-        grad = tape.gradient(loss, self.classifier.model.trainable_variables)
-        self.classifier.model.optimizer.apply_gradients(zip(grad, self.classifier.model.trainable_variables))
-        batch_size = tf.shape(x_batch)[0]
-        # epoch_dict["train_n"]  += tf.cast(batch_size, tf.float32)
-        return loss, batch_size
-
-    @tf.function
-    def _adv_step(self, x_batch, y_batch, trainer):
-        metrics = trainer.batch_process(x_batch, y_batch)
-        loss = metrics['loss']
-        # ctx: LossContext = metrics['ctx']
-        # accuracy = tf.reduce_mean(
-        #     tf.keras.metrics.sparse_categorical_accuracy(y_batch, ctx.logits_pert)
-        # )
-
-        batch_size = tf.shape(x_batch)[0]
-        return loss, batch_size
-
-        # epoch_dict["train_loss"] += loss * tf.cast(batch_size, tf.float32)
-        # epoch_dict["train_acc"]  += accuracy * tf.cast(batch_size, tf.float32)
-        # epoch_dict["train_n"]  += tf.cast(batch_size, tf.float32)
 
     def _dataset_to_iterator(self, dataset):
         for x_batch, y_batch in dataset:
