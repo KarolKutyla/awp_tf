@@ -6,7 +6,7 @@ from tensorflow import keras
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.attacks.pgd import PGDAttack
 from awp_protocol.losses.trades_loss import TradesLoss
-from awp_protocol.awp_proxy import AWPProxyCalculations
+from awp_protocol.awp_proxy import AWPProxyCalculations, AWPProxyParams
 
 from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
@@ -21,6 +21,7 @@ class AWPProtocolParams:
     awp_steps: int = 10
     mode: str = "trades"
     use_optimizer: bool = False
+    proxy_params: AWPProxyParams = AWPProxyParams()
 
 
 class AWPProtocolTF:
@@ -29,7 +30,8 @@ class AWPProtocolTF:
     def __init__(
             self,
             classifier: keras.Model,
-            proxy_classifier: AWPProxyCalculations,
+            proxy_classifier: keras.Model,
+            tracked_layers: tuple[bool],
             attack: TensorflowEvasionAttack | art.attacks.EvasionAttack | None = None,
             optimizer: keras.optimizers.Optimizer | None = None,
             params: AWPProtocolParams | None = None,
@@ -38,13 +40,14 @@ class AWPProtocolTF:
         self._params = params or AWPProtocolParams()
         self._params = replace(self._params, **overrides)
         self._classifier: tf.keras.Model = classifier
-        self._proxy_classifier: AWPProxyCalculations = proxy_classifier
+        self._proxy_classifier: keras.Model = proxy_classifier
+        self._proxy_calculator: AWPProxyCalculations = AWPProxyCalculations(self._proxy_classifier, tracked_layers, self._params.proxy_params)
             #AWPProxyClassifier(self._classifier, tracked_layers, params_dict['weight_constraint']))
 
         self._loss = _select_adversarial_loss_from_params(self._params)
         self._trades_beta = 0.1
 
-        temp_attack = _select_attack(attack, classifier)
+        temp_attack = _select_attack(attack, proxy_classifier)
         if isinstance(temp_attack, TensorflowEvasionAttack):
             self._attack_tf: TensorflowEvasionAttack = temp_attack
             self.batch_process = self._batch_process_tf
@@ -60,10 +63,10 @@ class AWPProtocolTF:
 
 
     def batch_process(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
-        print("placeholder")
+        raise Exception("batch_process method did not initialize properly!")
 
     def _batch_process_eager(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> dict:
-        self._proxy_classifier.copy_originator_state(self._classifier)
+        self._proxy_calculator.copy_originator_state(self._classifier)
         x_pert = x_batch
         x_np = x_batch.numpy()
         y_np = y_batch.numpy()
@@ -79,7 +82,7 @@ class AWPProtocolTF:
             ctx = self._feed_proxy(x_batch, y_batch, x_pert)
             loss = self._loss.calculate(ctx)
 
-        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
+        gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._update_classifier(gradient)
         return {
             "loss": loss,
@@ -88,7 +91,7 @@ class AWPProtocolTF:
 
     # @tf.function
     def _batch_process_tf(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
-        self._proxy_classifier.copy_originator_state(self._classifier)
+        self._proxy_calculator.copy_originator_state(self._classifier)
         x_pert = x_batch
         for a in range(self._alternate_iteration):
             x_pert = self._attack_tf.generate(x_batch, y_batch)
@@ -98,7 +101,7 @@ class AWPProtocolTF:
             ctx = self._feed_proxy(x_batch, y_batch, x_pert)
             loss = self._loss.calculate(ctx)
 
-        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
+        gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._update_classifier(gradient)
         return loss, ctx.logits_pert
 
@@ -113,14 +116,14 @@ class AWPProtocolTF:
         with tf.GradientTape() as tape:
             result = self._feed_proxy(x_batch, y_batch, x_pert)
             loss = self._loss.calculate(result)
-        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
-        self._proxy_classifier.calculate_and_store_weight_perturbation(gradient)
-        self._proxy_classifier.apply_stored_weight_perturbation(self._classifier)
+        gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
+        self._proxy_calculator.calculate_and_store_weight_perturbation(gradient)
+        self._proxy_calculator.apply_stored_weight_perturbation(self._classifier)
 
     # @tf.function
     def _feed_proxy(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._proxy_classifier.forward_pass(x_batch)
-        logits_adv = self._proxy_classifier.forward_pass(x_pert)
+        logits = self._proxy_calculator.forward_pass(x_batch)
+        logits_adv = self._proxy_calculator.forward_pass(x_pert)
         ctx = LossContext(
             x_batch=x_batch,
             x_pert=x_pert,

@@ -350,9 +350,11 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
 
     def _init_training_object(self):
         attack = pgd.PGDAttack(self._proxy_classifier.model)
+        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
         return awp_protocol_tf.AWPProtocolTF(
             self._classifier.model,
-            self._create_proxy_calculation_object(),
+            self._proxy_classifier.model,
+            tracked_layers,
             attack,
             self._classifier.optimizer,
             self._params.protocol_params)
@@ -368,5 +370,5 @@ def clone_classifier(originator: tf.keras.Model) -> tf.keras.Model:
     proxy_classifier.set_weights(originator.get_weights())
     return proxy_classifier
 
-def select_default_trained_layers_tf(classifier) -> tuple[bool, ...]:
+def select_default_trained_layers_tf(classifier) -> tuple[bool]:
         return tuple('kernel' in variable.name for variable in classifier.trainable_variables)
