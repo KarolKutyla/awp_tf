@@ -12,6 +12,20 @@ import torch
 
 def load_cifar_dataset():
     (x_train, y_train), (x_test, y_test) = keras.datasets.cifar10.load_data()
+    tf_train_ds = (
+        tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        .shuffle(50000)
+        .map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(64)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    tf_test_ds = (
+        tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        .map(lambda x, y: (tf.cast(x, dtype=tf.float32) / 255.0, y), num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(64)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
     x_train = x_train / 255.0
     x_test = x_test / 255.0
 
@@ -20,16 +34,22 @@ def load_cifar_dataset():
     torch.manual_seed(seed)
     tf.random.set_seed(seed)
 
-    tf_x_train = x_train.astype(np.float32)
-    tf_x_test = x_test.astype(np.float32)
-
-    tf_train_ds = tf.data.Dataset.from_tensor_slices((tf_x_train, y_train))
-    tf_train_ds = tf_train_ds.shuffle(10000).batch(64).prefetch(tf.data.AUTOTUNE)
-    tf_train_ds = tf_train_ds.cache().prefetch(tf.data.AUTOTUNE)
-
     torch_train_loader = _convert_to_torch_loader(x_train, y_train, shuffle=True)
     torch_test_loader = _convert_to_torch_loader(x_test, y_test)
-    return tf_train_ds, x_test, y_test, torch_train_loader, torch_test_loader
+    return tf_train_ds, tf_test_ds, torch_train_loader, torch_test_loader
+
+def preprocess(x, y):
+    x = tf.cast(x, tf.float32) / 255.0
+
+    x = tf.pad(x, [[4,4],[4,4],[0,0]])
+    x = tf.image.random_crop(x, [32,32,3])
+
+    x = tf.image.random_flip_left_right(x)
+
+    x = tf.image.random_brightness(x, 0.1)
+    x = tf.image.random_contrast(x, 0.9, 1.1)
+
+    return x, y
 
 def load_mnist_dataset():
     (x_train, y_train), (x_test, y_test) = mnist.load_data()

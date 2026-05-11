@@ -157,49 +157,16 @@ class AdversarialTrainerAWPTensorflow:
                                           the target classifier.
                 """
 
-        iterator_fn = lambda: self._dataset_to_iterator(train_dataset)
-
-        validation_fn = None
-
-        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
-
-    def fit_generator(
-            self,
-            generator: generator,
-            validation_data: tuple[np.ndarray, np.ndarray] | None = None,
-            nb_epochs: int = 20,
-            scheduler: None = None,
-            callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            **kwargs,
-    ):
-        """
-        Train model with AWP protocol using a data generator.
-        See class documentation for more information on the exact procedure.
-
-        :param generator: Data generator.
-        :param validation_data: Tuple consisting of validation data, (x_val, y_val)
-        :param nb_epochs: Number of epochs to use for trainings.
-        :param scheduler: Learning rate scheduler to run at the end of every epoch.
-        :param kwargs: Dictionary of framework-specific arguments. These will be passed as such to the `fit` function of
-                                  the target classifier.
-        """
-
-        nb_batches = int(np.ceil(generator.size / generator.batch_size))
-
-        iterator_fn = lambda: self._generator_to_iterator(generator, nb_batches)
-
-        validation_fn = None
-        if validation_data:
-            validation_fn = lambda: self._validate_dataset(*validation_data)
-
-        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
+        steps_per_epoch=train_dataset.cardinality()
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, steps_per_epoch=steps_per_epoch)
 
     def _train_loop(
             self,
-            iterator_fn,
+            train_dataset,
             nb_epochs,
+            validation_dataset=None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            validation_fn=None,
+            steps_per_epoch: int = None,
     ):
         callbacks = callbacks or []
         self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self._classifier)
@@ -209,18 +176,17 @@ class AdversarialTrainerAWPTensorflow:
 
         logger.info("Performing adversarial training with AWP with %s protocol", self._params.protocol_params.mode)
         for epoch in range(nb_epochs):
-            self._epoch_step(iterator_fn, validation_fn)
+            self._epoch_step(train_dataset, validation_dataset)
 
         self._callback_list.on_train_end(logs)
 
-    def _epoch_step(self, iterator_fn, validation_fn):
+    def _epoch_step(self, dataset, validation_fn=None):
         self._callback_list.on_epoch_begin(self._epochs_run)
         self._loss_metric.reset_state()
         self._accuracy_metric.reset_state()
 
-        iterator = iterator_fn()
-        if hasattr(iterator, "__len__"):
-            total_steps = len(iterator)
+        if hasattr(dataset, "__len__"):
+            total_steps = len(dataset)
         else:
             total_steps = self._steps_per_epoch
 
@@ -230,7 +196,7 @@ class AdversarialTrainerAWPTensorflow:
         )
 
         step = 0
-        for step, (x_batch, y_batch) in enumerate(iterator):
+        for step, (x_batch, y_batch) in enumerate(dataset):
             self._run_batch(x_batch, y_batch, step)
 
         if self._steps_per_epoch is None:
@@ -345,7 +311,6 @@ class AdversarialTrainerAWPTensorflow:
             self._proxy_classifier,
             tracked_layers,
             attack,
-            self._classifier.optimizer,
             self._params.protocol_params)
 
     def _create_proxy_calculation_object(self) -> awp_protocol_tf.AWPProxyCalculations:

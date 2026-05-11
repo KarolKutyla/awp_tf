@@ -21,23 +21,22 @@ class PGDAttack(TensorflowEvasionAttack):
             params: dict[str, object] | Any = None
     ):
         super().__init__(model)
-        self._forced_type = tf.float32
+        self._dtype = tf.float32
 
         params = _set_params(params)
-        self._perturbation_bound: float = tf.cast(params['perturbation_bound'], self._forced_type)
+        self._perturbation_bound: float = tf.cast(params['perturbation_bound'], self._dtype)
         self._pgd_step: int = params['pgd_step']
-        self._pgd_step_size: float = tf.cast(params['pgd_step_size'], self._forced_type)
+        self._pgd_step_size: float = tf.cast(params['pgd_step_size'], self._dtype)
 
     @tf.function
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
-        random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=self._forced_type)
+        random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=self._dtype)
         pert = random_sample * self._perturbation_bound
         x_adv = pert + x_batch
         for i in range(self._pgd_step):
             x_adv = self._pgd_iteration(x_batch, x_adv, y_batch)
         return x_adv
 
-    @tf.function
     def _pgd_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
         with tf.GradientTape() as tape:
             tape.watch(x_adv)

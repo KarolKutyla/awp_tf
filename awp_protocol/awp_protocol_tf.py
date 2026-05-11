@@ -30,7 +30,6 @@ class AWPProtocolTF:
             proxy_classifier: keras.Model,
             tracked_layers: tuple[bool, ...],
             attack: TensorflowEvasionAttack | None = None,
-            optimizer: keras.optimizers.Optimizer | None = None,
             params: AWPProtocolParams | None = None,
             **overrides
     ):
@@ -47,8 +46,7 @@ class AWPProtocolTF:
 
         self._attack_tf: TensorflowEvasionAttack = _select_attack(attack, proxy_classifier)
 
-        self._learning_rate: tf.Tensor = tf.cast(self._params.learning_rate, dtype=self._dtype)
-        self._optimizer: tf.optimizers.Optimizer | None = optimizer if optimizer is not None and self._params.use_optimizer else None
+        self._learning_rate: tf.Tensor = tf.constant(self._params.learning_rate, dtype=self._dtype)
 
         self._alternate_iteration = self._params.alternate_iteration
         self._awp_steps = self._params.awp_steps
@@ -98,12 +96,12 @@ class AWPProtocolTF:
     # @tf.function
     def _update_classifier(self, gradients: list[tf.Tensor]):
         variables = self._classifier.trainable_variables
-        if self._optimizer is not None:
+        if self._classifier.optimizer is not None:
             grads_and_vars = [
                 (g if g is not None else tf.zeros_like(v), v)
                 for g, v in zip(gradients, variables)
             ]
-            self._optimizer.apply_gradients(grads_and_vars)
+            self._classifier.optimizer.apply_gradients(grads_and_vars)
         else:
             for gradient, variable in zip(gradients, variables):
                 if gradient is None:

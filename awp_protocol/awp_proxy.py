@@ -25,7 +25,7 @@ class AWPProxyCalculations:
 
         self._params = params or AWPProxyParams()
         self._params = replace(self._params, **overrides)
-        self.step_size: float = tf.constant(self._params.step_size, dtype=self._dtype)
+        self.step_size: tf.Tensor = tf.constant(self._params.step_size, dtype=self._dtype)
         self._weight_constraint: tf.Tensor = tf.constant(self._params.weight_constraint, dtype=self._dtype)
 
         self._weight_perturbations: list[tf.Variable] = \

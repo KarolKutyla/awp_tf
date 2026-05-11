@@ -1,14 +1,16 @@
-import tensorflow
+import tensorflow as tf
+from keras.src.optimizers import SGD
+
 
 from actions import models, datasets, attacks
 
 from awp_protocol.attacks import pgd
 from awp_protocol import awp
 
-tensorflow.config.run_functions_eagerly(False)
-print(f"tf executing eagerly: {tensorflow.executing_eagerly()}")
+tf.config.run_functions_eagerly(False)
+print(f"tf executing eagerly: {tf.executing_eagerly()}")
 
-train_ds, x_test, y_test, _, _ = datasets.load_cifar_dataset()
+train_ds, tf_test_ds, _, _ = datasets.load_cifar_dataset()
 model = models.load_tensorflow_resnet()
 
 pgd_params = pgd.get_default_params()
@@ -50,8 +52,16 @@ input_shape = model.inputs[0].shape[1:]
 
 
 proxy_model = awp.clone_classifier(model)
+optimizer = tf.keras.optimizers.SGD(learning_rate=0.1, momentum=0.0, nesterov=False)
+model.optimizer = optimizer
+
+schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
+    boundaries=[50, 100],
+    values=[0.1, 0.01, 0.001]
+)
+
 attack = pgd.PGDAttack(proxy_model)
 
 trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0)
 
-trainer.fit_dataset(train_ds, nb_epochs=3)
+trainer.fit_dataset(train_ds, nb_epochs=200)
