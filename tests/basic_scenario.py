@@ -1,6 +1,4 @@
 import tensorflow
-from art.attacks.evasion import ProjectedGradientDescentTensorFlowV2
-
 
 from actions import models, datasets, attacks
 
@@ -39,8 +37,6 @@ plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
 
 input_shape = model.inputs[0].shape[1:]
-tfv2_classifier = awp.TensorFlowV2Classifier(model, 10, input_shape=input_shape, loss_object=model.loss)
-
 
 
 # attack = ProjectedGradientDescentTensorFlowV2(
@@ -53,10 +49,9 @@ tfv2_classifier = awp.TensorFlowV2Classifier(model, 10, input_shape=input_shape,
 
 
 
-# proxy_model = awp.clone_classifier(model)
-# tfv2_classifier_proxy = awp.TensorFlowV2Classifier(proxy_model, 10, input_shape=input_shape, loss_object=model.loss)
-# attack = pgd.PGDAttack(proxy_model)
-#
-# trainer = awp.AdversarialTrainerAWPTensorflow(tfv2_classifier, tfv2_classifier_proxy, attack, warmup=0)
-#
-# trainer.fit_dataset(train_ds, nb_epochs=3)
+proxy_model = awp.clone_classifier(model)
+attack = pgd.PGDAttack(proxy_model)
+
+trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0)
+
+trainer.fit_dataset(train_ds, nb_epochs=3)

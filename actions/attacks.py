@@ -54,6 +54,4 @@ class AdversarialPlots:
         max_probs = tf.reduce_max(probs, axis=-1)
         indices = tf.argmax(probs, axis=-1)
         rounded_probs = tf.round(max_probs * 1000) / 1000
-        print(rounded_probs)
-        print(tf.shape(rounded_probs))
         return indices, rounded_probs

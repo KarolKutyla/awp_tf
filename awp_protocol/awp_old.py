@@ -25,14 +25,22 @@ from dataclasses import dataclass, replace
 
 import logging
 
+import time
+
+import keras
 import numpy as np
+from keras.src.metrics import accuracy_metrics
+from tensorflow.python.profiler.profiler_v2 import warmup
+from tqdm.auto import tqdm, trange
 
 from art.defences.trainer.adversarial_trainer_awp_pytorch import AdversarialTrainerAWP, AdversarialTrainerAWPPyTorch
 from art.estimators.classification.tensorflow import TensorFlowV2Classifier
+from art.data_generators import DataGenerator
+from art.attacks.attack import EvasionAttack
+from art.utils import check_and_transform_label_format
 
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
-from tensorflow.python.tools.api.generator2.generator import generator
 
 from awp_protocol import awp_protocol_tf, awp_proxy
 from awp_protocol.attacks import pgd
@@ -46,7 +54,7 @@ class AWPParams:
     protocol_params = awp_protocol_tf.AWPProtocolParams()
     awp_params = awp_proxy.AWPProxyParams()
 
-class AdversarialTrainerAWPTensorflow:
+class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
     """
     Class performing adversarial training following Adversarial Weight Perturbation (AWP) protocol.
 
@@ -55,8 +63,8 @@ class AdversarialTrainerAWPTensorflow:
 
     def __init__(
             self,
-            classifier: tf.keras.Model,
-            proxy_classifier: tf.keras.Model,
+            classifier: TensorFlowV2Classifier,
+            proxy_classifier: TensorFlowV2Classifier,
             attack: TensorflowEvasionAttack,
             warmup: int = 0,
             trained_layers: tuple[bool, ...] | None = None,
@@ -75,9 +83,10 @@ class AdversarialTrainerAWPTensorflow:
         :param beta: The scaling factor controlling tradeoff between clean loss and adversarial loss for TRADES protocol
         :param warmup: The number of epochs after which weight perturbation is applied
         """
-        self._classifier: tf.keras.Model = classifier
-        self._proxy_classifier: tf.keras.Model = proxy_classifier
-        self._attack: TensorflowEvasionAttack = attack
+        super().__init__(classifier, proxy_classifier, None, None, None, None, warmup)
+        self._classifier: TensorFlowV2Classifier = classifier
+        self._proxy_classifier: TensorFlowV2Classifier = proxy_classifier
+        self._attack: EvasionAttack = attack
         self._warmup: int
         self._apply_wp: bool
         self._tracked_layers: tuple[bool, ...] | None = trained_layers
@@ -91,7 +100,6 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list: tf.keras.callbacks.CallbackList
         self._progbar: tf.keras.utils.Progbar
         self._trainer: awp_protocol_tf.AWPProtocolTF
-        self._warmup = warmup
 
         self._fast_mode = True
 
@@ -160,12 +168,15 @@ class AdversarialTrainerAWPTensorflow:
         iterator_fn = lambda: self._dataset_to_iterator(train_dataset)
 
         validation_fn = None
+        if validation_dataset:
+            validation_dataset = self._transform_dataset(validation_dataset, self.classifier.nb_classes, False)
+            validation_fn = lambda: self.run_validation(validation_dataset)
 
         self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
 
     def fit_generator(
             self,
-            generator: generator,
+            generator: DataGenerator,
             validation_data: tuple[np.ndarray, np.ndarray] | None = None,
             nb_epochs: int = 20,
             scheduler: None = None,
@@ -202,12 +213,12 @@ class AdversarialTrainerAWPTensorflow:
             validation_fn=None,
     ):
         callbacks = callbacks or []
-        self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self._classifier)
+        self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self.classifier.model)
         logs = {"loss": None, "accuracy": None}
         self._callback_list.on_train_begin()
         self._trainer = self._init_training_object()
 
-        logger.info("Performing adversarial training with AWP with %s protocol", self._params.protocol_params.mode)
+        logger.info("Performing adversarial training with AWP with %s protocol", self._mode)
         for epoch in range(nb_epochs):
             self._epoch_step(iterator_fn, validation_fn)
 
@@ -245,7 +256,7 @@ class AdversarialTrainerAWPTensorflow:
         self._epochs_run += 1
 
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step):
+    def _run_batch(self, x_batch, y_batch, step):
         if not self._fast_mode:
             self._callback_list.on_batch_begin(step)
 
@@ -275,10 +286,10 @@ class AdversarialTrainerAWPTensorflow:
 
     def _warmup_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
         with tf.GradientTape() as tape:
-            logits = self._classifier(x_batch, training=True)
-            loss = self._classifier.loss(y_batch, logits)
-        grad = tape.gradient(loss, self._classifier.trainable_variables)
-        self._classifier.optimizer.apply_gradients(zip(grad, self._classifier.trainable_variables))
+            logits = self.classifier.model(x_batch, training=True)
+            loss = self.classifier.model.loss(y_batch, logits)
+        grad = tape.gradient(loss, self.classifier.model.trainable_variables)
+        self.classifier.model.optimizer.apply_gradients(zip(grad, self.classifier.model.trainable_variables))
         return loss, logits
 
     def run_validation(self, validation_dataset):
@@ -294,8 +305,8 @@ class AdversarialTrainerAWPTensorflow:
         validation_dataset = validation_dataset.prefetch(tf.data.AUTOTUNE)
 
         for x_batch, y_batch in validation_dataset:
-            y_pred = self._classifier(x_batch, training=False)
-            loss_clean = tf.reduce_mean(self._classifier.loss(y_batch, y_pred))
+            y_pred = self.classifier.model(x_batch, training=False)
+            loss_clean = tf.reduce_mean(self.classifier.model.loss_object(y_batch, y_pred))
 
             clean_loss.update_state(loss_clean)
             clean_acc.update_state(y_batch, y_pred)
@@ -305,9 +316,9 @@ class AdversarialTrainerAWPTensorflow:
             # -----------------------
             x_adv = self._attack.generate(x_batch, y_batch)
 
-            y_adv_pred = self._classifier(x_adv, training=False)
+            y_adv_pred = self.classifier.model(x_adv, training=False)
 
-            loss_adv = tf.reduce_mean(self._classifier.loss(y_batch, y_adv_pred))
+            loss_adv = tf.reduce_mean(self.classifier.model.loss_object(y_batch, y_adv_pred))
 
             adv_loss.update_state(loss_adv)
             adv_acc.update_state(y_batch, y_adv_pred)
@@ -338,19 +349,19 @@ class AdversarialTrainerAWPTensorflow:
             yield x_batch, y_batch
 
     def _init_training_object(self):
-        attack = pgd.PGDAttack(self._proxy_classifier)
-        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier)
+        attack = pgd.PGDAttack(self._proxy_classifier.model)
+        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
         return awp_protocol_tf.AWPProtocolTF(
-            self._classifier,
-            self._proxy_classifier,
+            self._classifier.model,
+            self._proxy_classifier.model,
             tracked_layers,
             attack,
             self._classifier.optimizer,
             self._params.protocol_params)
 
     def _create_proxy_calculation_object(self) -> awp_protocol_tf.AWPProxyCalculations:
-        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier)
-        return awp_protocol_tf.AWPProxyCalculations(self._proxy_classifier, tracked_layers, self._params.awp_params)
+        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
+        return awp_protocol_tf.AWPProxyCalculations(self._proxy_classifier.model, tracked_layers, self._params.awp_params)
 
 
 
@@ -359,5 +370,5 @@ def clone_classifier(originator: tf.keras.Model) -> tf.keras.Model:
     proxy_classifier.set_weights(originator.get_weights())
     return proxy_classifier
 
-def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, ...]:
+def select_default_trained_layers_tf(classifier) -> tuple[bool]:
         return tuple('kernel' in variable.name for variable in classifier.trainable_variables)

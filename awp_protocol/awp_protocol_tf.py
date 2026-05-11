@@ -12,8 +12,6 @@ from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
 from awp_protocol.losses import trades_loss, adversarial_categorical_cross_entropy
 
-import art
-
 @dataclass(frozen=True)
 class AWPProtocolParams:
     alternate_iteration: int = 1
@@ -25,14 +23,13 @@ class AWPProtocolParams:
 
 
 class AWPProtocolTF:
-    EPS = 1e-8
 
     def __init__(
             self,
             classifier: keras.Model,
             proxy_classifier: keras.Model,
-            tracked_layers: tuple[bool],
-            attack: TensorflowEvasionAttack | art.attacks.EvasionAttack | None = None,
+            tracked_layers: tuple[bool, ...],
+            attack: TensorflowEvasionAttack | None = None,
             optimizer: keras.optimizers.Optimizer | None = None,
             params: AWPProtocolParams | None = None,
             **overrides
@@ -41,66 +38,32 @@ class AWPProtocolTF:
         self._params = replace(self._params, **overrides)
         self._classifier: tf.keras.Model = classifier
         self._proxy_classifier: keras.Model = proxy_classifier
-        self._proxy_calculator: AWPProxyCalculations = AWPProxyCalculations(self._proxy_classifier, tracked_layers, self._params.proxy_params)
+        self._proxy_calculator: AWPProxyCalculations = AWPProxyCalculations(self._classifier, self._proxy_classifier, tracked_layers, self._params.proxy_params)
             #AWPProxyClassifier(self._classifier, tracked_layers, params_dict['weight_constraint']))
 
-        self._loss = _select_adversarial_loss_from_params(self._params)
+        self._adversarial_loss = _select_adversarial_loss_from_params(self._params)
         self._trades_beta = 0.1
+        self._dtype : tf.dtypes.DType = tf.float32
 
-        temp_attack = _select_attack(attack, proxy_classifier)
-        if isinstance(temp_attack, TensorflowEvasionAttack):
-            self._attack_tf: TensorflowEvasionAttack = temp_attack
-            self.batch_process = self._batch_process_tf
-        if isinstance(temp_attack, art.attacks.attack.EvasionAttack):
-            self._eager_mode_attack: art.attacks.EvasionAttack = temp_attack
-            self.batch_process = self._batch_process_eager
+        self._attack_tf: TensorflowEvasionAttack = _select_attack(attack, proxy_classifier)
 
-        self._learning_rate: float = self._params.learning_rate
+        self._learning_rate: tf.Tensor = tf.cast(self._params.learning_rate, dtype=self._dtype)
         self._optimizer: tf.optimizers.Optimizer | None = optimizer if optimizer is not None and self._params.use_optimizer else None
 
         self._alternate_iteration = self._params.alternate_iteration
         self._awp_steps = self._params.awp_steps
 
-
-    def batch_process(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
-        raise Exception("batch_process method did not initialize properly!")
-
-    def _batch_process_eager(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> dict:
-        self._proxy_calculator.copy_originator_state(self._classifier)
-        x_pert = x_batch
-        x_np = x_batch.numpy()
-        y_np = y_batch.numpy()
-
-        x_pert = x_batch
-        for a in range(self._alternate_iteration):
-            x_pert_np = self._eager_mode_attack.generate(x_np, y_np)
-            x_pert = tf.convert_to_tensor(x_pert_np, dtype=x_batch.dtype)
-
-            self._find_weight_perturbation(x_batch, y_batch, x_pert)
-
-        with tf.GradientTape() as tape:
-            ctx = self._feed_proxy(x_batch, y_batch, x_pert)
-            loss = self._loss.calculate(ctx)
-
-        gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
-        self._update_classifier(gradient)
-        return {
-            "loss": loss,
-            "ctx": ctx
-        }
-
     # @tf.function
-    def _batch_process_tf(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
-        self._proxy_calculator.copy_originator_state(self._classifier)
+    def batch_process(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor]:
+        self._proxy_calculator.batch_process_begin()
         x_pert = x_batch
         for a in range(self._alternate_iteration):
             x_pert = self._attack_tf.generate(x_batch, y_batch)
             self._find_weight_perturbation(x_batch, y_batch, x_pert)
 
         with tf.GradientTape() as tape:
-            ctx = self._feed_proxy(x_batch, y_batch, x_pert)
-            loss = self._loss.calculate(ctx)
-
+            ctx = self._proxy_forward_pass(x_batch, y_batch, x_pert)
+            loss = self._adversarial_loss.calculate(ctx)
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._update_classifier(gradient)
         return loss, ctx.logits_pert
@@ -114,14 +77,13 @@ class AWPProtocolTF:
     # @tf.function
     def _weight_perturbation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
         with tf.GradientTape() as tape:
-            result = self._feed_proxy(x_batch, y_batch, x_pert)
-            loss = self._loss.calculate(result)
+            result = self._proxy_forward_pass(x_batch, y_batch, x_pert)
+            loss = self._adversarial_loss.calculate(result)
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
-        self._proxy_calculator.calculate_and_store_weight_perturbation(gradient)
-        self._proxy_calculator.apply_stored_weight_perturbation(self._classifier)
+        self._proxy_calculator.calculate_and_update_weight_perturbation(gradient)
 
     # @tf.function
-    def _feed_proxy(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+    def _proxy_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
         logits = self._proxy_calculator.forward_pass(x_batch)
         logits_adv = self._proxy_calculator.forward_pass(x_pert)
         ctx = LossContext(
@@ -168,14 +130,11 @@ def _clone_init_optimizer_for_proxy_classifier(proxy_classifier, optimizer, lear
     return opt
 
 
-def _select_attack(attack: TensorflowEvasionAttack | art.attacks.attack.EvasionAttack | None,
-                   model: keras.Model) -> TensorflowEvasionAttack | art.attacks.attack.EvasionAttack:
+def _select_attack(attack: TensorflowEvasionAttack | None, proxy_classifier: keras.Model) -> TensorflowEvasionAttack:
     if attack is None:
         adv_loss = TradesLoss()
-        return PGDAttack(model, adv_loss)
+        return PGDAttack(proxy_classifier, adv_loss)
     if isinstance(attack, TensorflowEvasionAttack):
-        return attack
-    if isinstance(attack, art.attacks.attack.EvasionAttack):
         return attack
     else:
         raise Exception(f"Invalid type of attack: {type(attack)}")
