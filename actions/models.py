@@ -24,6 +24,9 @@ def load_tensorflow_resnet():
     )
     optimizer = tensorflow.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
     keras_resnet.compile(loss=loss, optimizer=optimizer)
+
+    # print(keras_resnet.summary())
+
     return keras_resnet
 
 def load_torch_resnet():

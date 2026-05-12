@@ -11,7 +11,7 @@ from awp_protocol.attacks.attack import TensorflowEvasionAttack
 class PGDParams:
     perturbation_bound: float = 8 /255
     pgd_step: int = 10
-    pgd_step_size: float = 0.1
+    pgd_step_size: float = 2 / 255
 
 
 class PGDAttack(TensorflowEvasionAttack):
@@ -32,11 +32,10 @@ class PGDAttack(TensorflowEvasionAttack):
 
     @tf.function
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
-        random_sample = tf.random.uniform(shape=x_batch.shape, minval=-1.0, maxval=1.0, dtype=self._dtype)
-        pert = random_sample * self._perturbation_bound
-        x_adv = pert + x_batch
+        x_adv = x_batch + tf.random.uniform(shape=x_batch.shape, minval=-self._perturbation_bound, maxval=self._perturbation_bound, dtype=self._dtype)
         for i in range(self._pgd_step):
             x_adv = self._pgd_iteration(x_batch, x_adv, y_batch)
+            x_adv = tf.stop_gradient(x_adv)
         return x_adv
 
     def _pgd_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
