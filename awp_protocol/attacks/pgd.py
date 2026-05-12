@@ -9,7 +9,7 @@ from awp_protocol.attacks.attack import TensorflowEvasionAttack
 
 @dataclass(frozen=True)
 class PGDParams:
-    perturbation_bound: float = 8 /255
+    perturbation_bound: float = 8 / 255
     pgd_step: int = 10
     pgd_step_size: float = 2 / 255
 

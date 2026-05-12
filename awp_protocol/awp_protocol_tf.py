@@ -15,11 +15,12 @@ from awp_protocol.losses import trades_loss, adversarial_categorical_cross_entro
 @dataclass(frozen=True)
 class AWPProtocolParams:
     alternate_iteration: int = 1
-    learning_rate: float = 0.01
     awp_steps: int = 10
+    learning_rate: float = 0.01
     mode: str = "trades"
-    use_optimizer: bool = False
-    proxy_params: AWPProxyParams = AWPProxyParams()
+    use_optimizer: bool = True
+    weight_constraint: float = 5.0e-3
+    step_size: float = weight_constraint / (awp_steps * alternate_iteration)
 
 
 class AWPProtocolTF:
@@ -35,9 +36,11 @@ class AWPProtocolTF:
     ):
         self._params = params or AWPProtocolParams()
         self._params = replace(self._params, **overrides)
+
         self._classifier: tf.keras.Model = classifier
         self._proxy_classifier: keras.Model = proxy_classifier
-        self._proxy_calculator: AWPProxyCalculations = AWPProxyCalculations(self._classifier, self._proxy_classifier, tracked_layers, self._params.proxy_params)
+        proxy_classifier_params = AWPProxyParams(weight_constraint=self._params.weight_constraint, step_size=self._params.step_size)
+        self._proxy_calculator: AWPProxyCalculations = AWPProxyCalculations(self._classifier, self._proxy_classifier, tracked_layers, proxy_classifier_params)
             #AWPProxyClassifier(self._classifier, tracked_layers, params_dict['weight_constraint']))
 
         self._adversarial_loss = _select_adversarial_loss_from_params(self._params)
@@ -102,7 +105,6 @@ class AWPProtocolTF:
                 for g, v in zip(gradients, variables)
                 if g is not None
             ]
-            tf.print(gradients)
             self._classifier.optimizer.apply_gradients(grads_and_vars)
         else:
             for gradient, variable in zip(gradients, variables):

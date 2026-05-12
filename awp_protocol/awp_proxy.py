@@ -7,8 +7,8 @@ from tensorflow import stack
 
 @dataclass(frozen=True)
 class AWPProxyParams:
-    step_size: float = 2/255
-    weight_constraint: float = 0.01
+    weight_constraint: float = 5.0e-3
+    step_size: float = weight_constraint / 50
 
 class AWPProxyCalculations:
     def __init__(
