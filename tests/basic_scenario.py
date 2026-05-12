@@ -1,11 +1,14 @@
 import tensorflow as tf
 from keras.src.optimizers import SGD
 from keras.src.optimizers.schedules import learning_rate_schedule
+from torch._inductor.template_heuristics import params
 
 from actions import models, datasets, attacks
 
 from awp_protocol.attacks import pgd
 from awp_protocol import awp
+
+from awp_protocol import awp_protocol_tf
 
 tf.config.run_functions_eagerly(False)
 print(f"tf executing eagerly: {tf.executing_eagerly()}")
@@ -51,17 +54,12 @@ input_shape = model.inputs[0].shape[1:]
 
 
 proxy_model = awp.clone_classifier(model)
-schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-    boundaries=[50, 100],
-    values=[0.1, 0.01, 0.001]
-)
-optimizer = tf.keras.optimizers.SGD(learning_rate=0.1, momentum=0.0, nesterov=False, learning_rate_schedule=schedule)
-model.optimizer = optimizer
 
+params = pgd.PGDParams(pgd_step=1)
+attack = pgd.PGDAttack(proxy_model, params=params)
 
-
-attack = pgd.PGDAttack(proxy_model)
-
-trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0)
+protocol_params = awp_protocol_tf.AWPProtocolParams(awp_steps=1)
+params = awp.AWPParams(protocol_params=protocol_params)
+trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
 
 trainer.fit_dataset(train_ds, nb_epochs=200)

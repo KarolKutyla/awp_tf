@@ -1,3 +1,4 @@
+import tensorflow
 from tensorflow import keras
 import keras_cv
 
@@ -16,10 +17,12 @@ def load_tensorflow_resnet():
     outputs = keras.layers.Dense(10)(x)
 
     keras_resnet = keras.Model(backbone.inputs, outputs)
-
     loss = keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-    optimizer = keras.optimizers.Adam(learning_rate=1e-3)
-
+    schedule = tensorflow.keras.optimizers.schedules.PiecewiseConstantDecay(
+        boundaries=[5000, 10000],
+        values=[0.1, 0.01, 0.001]
+    )
+    optimizer = tensorflow.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
     keras_resnet.compile(loss=loss, optimizer=optimizer)
     return keras_resnet
 

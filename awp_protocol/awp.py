@@ -43,8 +43,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AWPParams:
-    protocol_params = awp_protocol_tf.AWPProtocolParams()
-    awp_params = awp_proxy.AWPProxyParams()
+    protocol_params: awp_protocol_tf.AWPProtocolParams = awp_protocol_tf.AWPProtocolParams()
+    awp_params: awp_proxy.AWPProxyParams = awp_proxy.AWPProxyParams()
 
 class AdversarialTrainerAWPTensorflow:
     """
@@ -229,7 +229,7 @@ class AdversarialTrainerAWPTensorflow:
                 values = [("loss", self._loss_metric.result())]
                 self._progbar.update(step + 1, values=values)
 
-    @tf.function(jit_compile=True)
+    @tf.function(jit_compile=False)
     def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool):
         if warmup:
             loss, logits =  self._warmup_step(x_batch, y_batch)

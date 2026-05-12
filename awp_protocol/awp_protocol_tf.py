@@ -63,7 +63,6 @@ class AWPProtocolTF:
             ctx = self._proxy_forward_pass(x_batch, y_batch, x_pert)
             loss = self._adversarial_loss.calculate(ctx)
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
-        print("XD")
         self._update_classifier(gradient)
         return loss, ctx.logits_pert
 
@@ -99,9 +98,11 @@ class AWPProtocolTF:
         variables = self._classifier.trainable_variables
         if self._classifier.optimizer is not None:
             grads_and_vars = [
-                (g if g is not None else tf.zeros_like(v), v)
+                (g, v)
                 for g, v in zip(gradients, variables)
+                if g is not None
             ]
+            tf.print(gradients)
             self._classifier.optimizer.apply_gradients(grads_and_vars)
         else:
             for gradient, variable in zip(gradients, variables):
