@@ -62,4 +62,4 @@ protocol_params = awp_protocol_tf.AWPProtocolParams(awp_steps=1)
 params = awp.AWPParams(protocol_params=protocol_params)
 trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
 
-trainer.fit_dataset(train_ds, nb_epochs=200)
+trainer.fit_dataset(train_ds, nb_epochs=2)
