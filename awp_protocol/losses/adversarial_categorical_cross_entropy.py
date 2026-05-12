@@ -12,5 +12,5 @@ class AdversarialSparseCategoricalCrossEntropy(AdversarialLoss):
     def calculate(self, loss_context: LossContext) -> tf.Tensor:
         y = loss_context.y_true
         logits_adv = loss_context.logits_pert
-        loss = tf.losses.sparse_categorical_crossentropy(y, logits_adv)
+        loss = tf.losses.sparse_categorical_crossentropy(y, logits_adv, from_logits=True)
         return loss

@@ -50,6 +50,7 @@ class AWPProtocolTF:
         self._attack_tf: TensorflowEvasionAttack = _select_attack(attack, proxy_classifier)
 
         self._learning_rate: tf.Tensor = tf.constant(self._params.learning_rate, dtype=self._dtype)
+        self._use_optimizer: bool = self._params.use_optimizer
 
         self._alternate_iteration = self._params.alternate_iteration
         self._awp_steps = self._params.awp_steps
@@ -75,7 +76,6 @@ class AWPProtocolTF:
         for j in range(self._awp_steps):
             self._weight_perturbation_step(x_batch, y_batch, x_pert)
 
-    # @tf.function
     def _weight_perturbation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
         with tf.GradientTape() as tape:
             result = self._proxy_forward_pass(x_batch, y_batch, x_pert)
@@ -83,7 +83,6 @@ class AWPProtocolTF:
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._proxy_calculator.calculate_and_update_weight_perturbation(gradient)
 
-    # @tf.function
     def _proxy_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
         logits = self._proxy_calculator.forward_pass(x_batch)
         logits_adv = self._proxy_calculator.forward_pass(x_pert)
@@ -96,16 +95,15 @@ class AWPProtocolTF:
         )
         return ctx
 
-    # @tf.function
     def _update_classifier(self, gradients: list[tf.Tensor]):
         variables = self._classifier.trainable_variables
-        if self._classifier.optimizer is not None:
-            grads_and_vars = [
-                (g, v)
-                for g, v in zip(gradients, variables)
-                if g is not None
-            ]
-            self._classifier.optimizer.apply_gradients(grads_and_vars)
+        if self._use_optimizer and self._classifier.optimizer is not None:
+            # grads_and_vars = [
+            #     (g, v)
+            #     for g, v in zip(gradients, variables)
+            #     if g is not None
+            # ]
+            self._classifier.optimizer.apply(gradients)
         else:
             for gradient, variable in zip(gradients, variables):
                 if gradient is None:

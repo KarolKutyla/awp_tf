@@ -18,8 +18,8 @@ model = models.load_tensorflow_resnet()
 
 pgd_attack = pgd.PGDAttack(model)
 
-x_batch, y_batch = next(iter(train_ds))
-x_adv = pgd_attack.generate(x_batch, y_batch)
+# x_batch, y_batch = next(iter(train_ds))
+# x_adv = pgd_attack.generate(x_batch, y_batch)
 
 # tf_evaluation_clean = model.evaluate(x_batch, y_batch)
 # tf_evaluation_adv = model.evaluate(x_adv, y_batch)
@@ -36,8 +36,8 @@ x_adv = pgd_attack.generate(x_batch, y_batch)
 # 8: "ship",
 # 9: "truck" }
 
-plotter = attacks.AdversarialPlots(pgd_attack, labels)
-plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
+# plotter = attacks.AdversarialPlots(pgd_attack, labels)
+# plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
 
 input_shape = model.inputs[0].shape[1:]
