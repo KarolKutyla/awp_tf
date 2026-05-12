@@ -180,6 +180,7 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list.on_train_end(logs)
 
     def _epoch_step(self, dataset, validation_fn=None):
+        self._epochs_run += 1
         self._callback_list.on_epoch_begin(self._epochs_run)
         self._loss_metric.reset_state()
         self._accuracy_metric.reset_state()
@@ -207,7 +208,6 @@ class AdversarialTrainerAWPTensorflow:
         if validation_fn:
             logs.update(validation_fn())
         self._callback_list.on_epoch_end(self._epochs_run, logs)
-        self._epochs_run += 1
 
 
     def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step):
