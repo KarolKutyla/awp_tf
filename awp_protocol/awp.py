@@ -312,11 +312,6 @@ class AdversarialTrainerAWPTensorflow:
             attack,
             self._params.protocol_params)
 
-    def _create_proxy_calculation_object(self) -> awp_protocol_tf.AWPProxyCalculations:
-        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier)
-        return awp_protocol_tf.AWPProxyCalculations(self._proxy_classifier, tracked_layers, self._params.awp_params)
-
-
 
 def clone_classifier(originator: tf.keras.Model) -> tf.keras.Model:
     proxy_classifier = tf.keras.models.clone_model(originator)

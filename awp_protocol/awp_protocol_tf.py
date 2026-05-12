@@ -63,11 +63,13 @@ class AWPProtocolTF:
             x_pert = self._attack_tf.generate(x_batch, y_batch)
             self._find_weight_perturbation(x_batch, y_batch, x_pert)
 
+        self._proxy_calculator.add_weight_perturbations()
         with tf.GradientTape() as tape:
-            ctx = self._proxy_forward_pass(x_batch, y_batch, x_pert)
+            ctx = self._model_forward_pass(x_batch, y_batch, x_pert)
             loss = self._adversarial_loss.calculate(ctx)
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._update_classifier(gradient)
+        self._proxy_calculator.subtract_weight_perturbations()
         return loss, ctx.logits_pert
 
 
@@ -82,6 +84,18 @@ class AWPProtocolTF:
             loss = self._adversarial_loss.calculate(result)
         gradient = tape.gradient(loss, self._proxy_calculator.trainable_variables)
         self._proxy_calculator.calculate_and_update_weight_perturbation(gradient)
+
+    def _model_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+        logits = self._classifier(x_batch, training=True)
+        logits_adv = self._classifier(x_pert, training=True)
+        ctx = LossContext(
+            x_batch=x_batch,
+            x_pert=x_pert,
+            y_true=y_batch,
+            logits_out=logits,
+            logits_pert=logits_adv
+        )
+        return ctx
 
     def _proxy_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
         logits = self._proxy_calculator.forward_pass(x_batch)
