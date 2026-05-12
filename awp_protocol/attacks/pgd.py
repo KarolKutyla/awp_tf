@@ -41,7 +41,7 @@ class PGDAttack(TensorflowEvasionAttack):
     def _pgd_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
         with tf.GradientTape() as tape:
             tape.watch(x_adv)
-            logits = self.model(x_adv, training=False)
+            logits = self.model(x_adv, training=True)
             loss = tf.keras.losses.sparse_categorical_crossentropy(y, logits, from_logits=True)
             loss = tf.reduce_mean(loss)
         gradient = tape.gradient(loss, x_adv)
