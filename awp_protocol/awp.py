@@ -26,7 +26,9 @@ from dataclasses import dataclass, replace
 import logging
 
 import tensorflow as tf
+from keras_core.src.utils import progbar
 from tensorflow.keras.callbacks import Callback
+from tensorflow.python.profiler.profiler_v2 import warmup
 
 from awp_protocol import batch_processor
 from awp_protocol.attacks import pgd
@@ -171,8 +173,10 @@ class AdversarialTrainerAWPTensorflow:
 
         self._callback_list.on_epoch_begin(self._epochs_run)
 
+        warmup = epoch <= self._warmup
         for step, (x_batch, y_batch) in enumerate(train_dataset):
-            self._run_batch(x_batch, y_batch, step)
+            self._run_batch(x_batch, y_batch, step+1, warmup=warmup)
+        self._progbar.update(self._steps_per_epoch, finalize=True)
 
         logs = self._collect_logs()
         if validation_dataset is not None:
@@ -184,13 +188,12 @@ class AdversarialTrainerAWPTensorflow:
                 "robust_loss": self._robust_loss_metric.result(),
                 "robust_accuracy": self._robust_accuracy_metric.result(),
             })
-        self._callback_list.on_epoch_end(self._epochs_run, logs)
+        self._callback_list.on_epoch_end(epoch, logs)
 
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step):
+    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup):
         self._callback_list.on_batch_begin(step)
 
-        warmup = self._epochs_run < self._warmup
         batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
         self._update_metrics(y_batch, batch_results)
 
