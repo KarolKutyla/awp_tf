@@ -176,7 +176,6 @@ class AdversarialTrainerAWPTensorflow:
         warmup = epoch <= self._warmup
         for step, (x_batch, y_batch) in enumerate(train_dataset):
             self._run_batch(x_batch, y_batch, step+1, warmup=warmup)
-        self._progbar.update(self._steps_per_epoch, finalize=True)
 
         logs = self._collect_logs()
         if validation_dataset is not None:
@@ -188,6 +187,8 @@ class AdversarialTrainerAWPTensorflow:
                 "robust_loss": self._robust_loss_metric.result(),
                 "robust_accuracy": self._robust_accuracy_metric.result(),
             })
+
+        self._progbar.update(self._steps_per_epoch, finalize=True)
         self._callback_list.on_epoch_end(epoch, logs)
 
 
