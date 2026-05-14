@@ -31,8 +31,8 @@ from tensorflow.keras.callbacks import Callback
 from awp_protocol import batch_processor
 from awp_protocol.attacks import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
-from callbacks.progbar_logger import ProgbarLogger
-from callbacks.checkpoint_callback import EpochCheckpoint
+from awp_protocol.callbacks.progbar_logger import ProgbarLogger
+from awp_protocol.callbacks.checkpoint_callback import EpochCheckpoint
 
 logger = logging.getLogger(__name__)
 
