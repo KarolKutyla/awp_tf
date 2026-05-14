@@ -26,11 +26,9 @@ from dataclasses import dataclass, replace
 import logging
 
 import tensorflow as tf
-from scipy.linalg import _decomp_update
 from tensorflow.keras.callbacks import Callback
-from tensorflow.python.tools.api.generator2.generator import generator
 
-import batch_processor
+from awp_protocol import batch_processor
 from awp_protocol.attacks import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from callbacks.progbar_logger import ProgbarLogger
