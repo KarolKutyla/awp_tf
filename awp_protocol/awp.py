@@ -25,25 +25,22 @@ from dataclasses import dataclass, replace
 
 import logging
 
-import numpy as np
-
-from art.defences.trainer.adversarial_trainer_awp_pytorch import AdversarialTrainerAWP, AdversarialTrainerAWPPyTorch
-from art.estimators.classification.tensorflow import TensorFlowV2Classifier
-
 import tensorflow as tf
+from scipy.linalg import _decomp_update
 from tensorflow.keras.callbacks import Callback
 from tensorflow.python.tools.api.generator2.generator import generator
 
-from awp_protocol import awp_protocol_tf, awp_proxy
+import batch_processor
 from awp_protocol.attacks import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
-from awp_protocol.losses.loss_context import LossContext
+from callbacks.progbar_logger import ProgbarLogger
+from callbacks.checkpoint_callback import EpochCheckpoint
 
 logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
-class AWPParams:
-    protocol_params: awp_protocol_tf.AWPProtocolParams = awp_protocol_tf.AWPProtocolParams()
+class Params:
+    protocol_params: batch_processor.AWPParams = batch_processor.AWPParams()
 
 class AdversarialTrainerAWPTensorflow:
     """
@@ -59,7 +56,7 @@ class AdversarialTrainerAWPTensorflow:
             attack: TensorflowEvasionAttack,
             warmup: int = 0,
             trained_layers: tuple[bool, ...] | None = None,
-            params: AWPParams | None = None,
+            params: Params | None = None,
             **overrides
     ):
         """
@@ -74,90 +71,72 @@ class AdversarialTrainerAWPTensorflow:
         :param beta: The scaling factor controlling tradeoff between clean loss and adversarial loss for TRADES protocol
         :param warmup: The number of epochs after which weight perturbation is applied
         """
+        self._fast_mode = True
+
+        self._params = params or Params()
+        self._params = replace(self._params, **overrides)
+
         self._classifier: tf.keras.Model = classifier
         self._proxy_classifier: tf.keras.Model = proxy_classifier
         self._attack: TensorflowEvasionAttack = attack
         self._warmup: int
         self._apply_wp: bool
         self._tracked_layers: tuple[bool, ...] | None = trained_layers
-        self._params = params or AWPParams()
-        self._params = replace(self._params, **overrides)
 
-        self._loss_metric = tf.keras.metrics.Mean()
-        self._accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
-        self._steps_per_epoch = None
+        self._steps_per_epoch: int | None = None
         self._epochs_run = 0
-        self._callback_list: tf.keras.callbacks.CallbackList
-        self._progbar: tf.keras.utils.Progbar
-        self._trainer: awp_protocol_tf.AWPProtocolTF
+        self._trainer: batch_processor.BatchProcessor
         self._warmup = warmup
 
-        self._fast_mode = True
+        self._progbar: tf.keras.utils.Progbar
+        self._callback_list: tf.keras.callbacks.CallbackList
+        self._logger: ProgbarLogger
+        self._ckpt = EpochCheckpoint(self._classifier.name)
+
+        self._clean_loss_metric = tf.keras.metrics.Mean()
+        self._clean_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
+        self._robust_loss_metric = tf.keras.metrics.Mean()
+        self._robust_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
+
 
     def fit(
             self,
-            x: np.ndarray,
-            y: np.ndarray,
-            validation_data: tuple[np.ndarray, np.ndarray] | None = None,
+            x: tf.Tensor,
+            y: tf.Tensor,
+            validation_data: tuple[tf.Tensor, tf.Tensor] | None = None,
             batch_size: int = 128,
             nb_epochs: int = 1,
             callbacks: list[Callback] | None = None,
             **kwargs,
     ):
-        """
-        Train model with AWP protocol.
-        See class documentation for more information on the exact procedure.
+        train_dataset = (
+            tf.data.Dataset.from_tensor_slices((x, y))
+            .batch(batch_size, drop_remainder=True)
+            .prefetch(tf.data.AUTOTUNE))
+        self._steps_per_epoch = train_dataset.cardinality().numpy() or None
 
-        :param x: Training set.
-        :param y: Labels for the training set.
-        :param validation_data: Tuple consisting of validation data, (x_val, y_val)
-        :param batch_size: Size of batches.
-        :param nb_epochs: Number of epochs to use for trainings.
-        :param callbacks: List of callbacks as in keras
-        :param kwargs: Dictionary of framework-specific arguments. These will be passed as such to the `fit` function of
-                                  the target classifier.
-        """
-
-        iterator_fn = lambda: self._numpy_to_iterator(x, y, batch_size)
-
-        validation_fn = None
+        validation_dataset = None
         if validation_data:
-            validation_fn = lambda: self._validate_dataset(*validation_data)
+            val_x, val_y = validation_data
+            validation_dataset = (
+                tf.data.Dataset.from_tensor_slices((val_x, val_y))
+                .batch(batch_size, drop_remainder=True)
+                .prefetch(tf.data.AUTOTUNE)
+            )
 
-        self._train_loop(iterator_fn, nb_epochs, callbacks, validation_fn)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
 
-    def _transform_dataset(self, dataset: tf.data.Dataset, nb_classes: int, apply_fit: bool):
-        def check_transform_and_preprocess(x, y):
-            y = tf.squeeze(y)
-            y = tf.cast(y, tf.int32)
-            x, y = self._classifier._apply_preprocessing(x, y, fit=apply_fit)
-            return x, y
-        transformed_dataset = dataset.map(check_transform_and_preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-        return transformed_dataset
 
-    def fit_dataset(self,
+    def fit_dataset(
+            self,
             train_dataset: tf.data.Dataset,
             validation_dataset: tf.data.Dataset | None = None,
             nb_epochs: int = 1,
-            callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            **kwargs):
+            callbacks: list[tf.keras.callbacks.Callback] | None = None
+    ):
+        self._steps_per_epoch = train_dataset.cardinality().numpy() or None
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
 
-        """
-                Train model with AWP protocol.
-                See class documentation for more information on the exact procedure.
-
-                :param x: Training set.
-                :param y: Labels for the training set.
-                :param validation_data: Tuple consisting of validation data, (x_val, y_val)
-                :param batch_size: Size of batches.
-                :param nb_epochs: Number of epochs to use for trainings.
-                :param callbacks: List of callbacks as in keras
-                :param kwargs: Dictionary of framework-specific arguments. These will be passed as such to the `fit` function of
-                                          the target classifier.
-                """
-
-        steps_per_epoch=train_dataset.cardinality()
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, steps_per_epoch=steps_per_epoch)
 
     def _train_loop(
             self,
@@ -168,144 +147,98 @@ class AdversarialTrainerAWPTensorflow:
             steps_per_epoch: int = None,
     ):
         callbacks = callbacks or []
+        self._logger = ProgbarLogger()
+        callbacks += [self._logger]
         self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self._classifier)
-        logs = {"loss": None, "accuracy": None}
+
         self._callback_list.on_train_begin()
         self._trainer = self._init_training_object()
 
         logger.info("Performing adversarial training with AWP with %s protocol", self._params.protocol_params.mode)
+
         for epoch in range(nb_epochs):
-            self._epoch_step(train_dataset, validation_dataset)
+            self._epoch(train_dataset, validation_dataset)
 
-        self._callback_list.on_train_end(logs)
+        self._callback_list.on_train_end()
 
-    def _epoch_step(self, dataset, validation_fn=None):
+
+    def _epoch(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset | None = None):
         self._epochs_run += 1
-        self._callback_list.on_epoch_begin(self._epochs_run)
-        self._loss_metric.reset_state()
-        self._accuracy_metric.reset_state()
-
-        if hasattr(dataset, "__len__"):
-            total_steps = len(dataset)
-        else:
-            total_steps = self._steps_per_epoch
+        self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
-            total_steps,
+            self._steps_per_epoch,
             stateful_metrics=["loss", "accuracy"]
         )
+        self._logger.update_progbar(self._progbar)
 
-        step = 0
-        for step, (x_batch, y_batch) in enumerate(dataset):
+        self._callback_list.on_epoch_begin(self._epochs_run)
+
+        for step, (x_batch, y_batch) in enumerate(train_dataset):
             self._run_batch(x_batch, y_batch, step)
 
-        if self._steps_per_epoch is None:
-            self._steps_per_epoch = step + 1
         logs = {
-            "loss": self._loss_metric.result(),
-            "accuracy": self._accuracy_metric.result()
+            "loss": self._clean_loss_metric.result(),
+            "accuracy": self._clean_accuracy_metric.result(),
+            "robust_loss": self._robust_loss_metric.result(),
+            "robust_accuracy": self._robust_accuracy_metric.result(),
         }
-        if validation_fn:
-            logs.update(validation_fn())
+
+        if validation_dataset is not None:
+            self._run_validation(validation_dataset)
+            logs.update({
+                "val_loss": self._clean_loss_metric.result(),
+                "val_accuracy": self._clean_accuracy_metric.result(),
+                "robust_loss": self._robust_loss_metric.result(),
+                "robust_accuracy": self._robust_accuracy_metric.result(),
+            })
+
         self._callback_list.on_epoch_end(self._epochs_run, logs)
 
 
     def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step):
-        if not self._fast_mode:
-            self._callback_list.on_batch_begin(step)
+        self._callback_list.on_batch_begin(step)
 
         warmup = self._epochs_run < self._warmup
-        self._train_step(x_batch, y_batch, warmup=warmup)
+        batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
+        self._update_metrics(y_batch, batch_results)
 
-        if not self._fast_mode:
-            self._callback_list.on_batch_end(self._epochs_run, {"loss": self._loss_metric.result()})
+        self._callback_list.on_batch_end(self._epochs_run, {"loss": self._clean_loss_metric.result()})
 
-        if step % 10 == 0:
-            if not self._fast_mode:
-                values = [("loss", self._loss_metric.result()), ("accuracy", self._accuracy_metric.result())]
-                self._progbar.update(step + 1, values=values)
-            else:
-                values = [("loss", self._loss_metric.result())]
-                self._progbar.update(step + 1, values=values)
 
-    @tf.function(jit_compile=True)
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool):
-        if warmup:
-            loss, logits =  self._warmup_step(x_batch, y_batch)
-        else:
-            loss, logits =  self._trainer.batch_process(x_batch, y_batch)
-        self._loss_metric.update_state(loss)
-        if not self._fast_mode:
-            self._accuracy_metric.update_state(y_batch, logits)
-
-    def _warmup_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor):
-        with tf.GradientTape() as tape:
-            logits = self._classifier(x_batch, training=True)
-            loss = self._classifier.loss(y_batch, logits)
-        grad = tape.gradient(loss, self._classifier.trainable_variables)
-        self._classifier.optimizer.apply_gradients(zip(grad, self._classifier.trainable_variables))
-        return loss, logits
-
-    def run_validation(self, validation_dataset):
-        if validation_dataset is None:
-            return {}
-
-        clean_loss = tf.keras.metrics.Mean()
-        adv_loss = tf.keras.metrics.Mean()
-
-        clean_acc = tf.keras.metrics.SparseCategoricalAccuracy()
-        adv_acc = tf.keras.metrics.SparseCategoricalAccuracy()
-
-        validation_dataset = validation_dataset.prefetch(tf.data.AUTOTUNE)
-
+    def _run_validation(self, validation_dataset):
+        self._reset_metrics()
         for x_batch, y_batch in validation_dataset:
-            y_pred = self._classifier(x_batch, training=False)
-            loss_clean = tf.reduce_mean(self._classifier.loss(y_batch, y_pred))
+            batch_results = self._trainer.validation_step(x_batch, y_batch)
+            self._update_metrics(y_batch, batch_results)
 
-            clean_loss.update_state(loss_clean)
-            clean_acc.update_state(y_batch, y_pred)
 
-            # -----------------------
-            # ADVERSARIAL
-            # -----------------------
-            x_adv = self._attack.generate(x_batch, y_batch)
+    def _update_metrics(self, y_batch, batch_results: tuple):
+        clean_loss, clean_logits, robust_loss, robust_logits = batch_results
+        self._clean_loss_metric.update_state(clean_loss)
+        self._clean_accuracy_metric.update_state(y_batch, clean_logits)
+        self._robust_loss_metric.update_state(robust_loss)
+        self._robust_accuracy_metric.update_state(y_batch, robust_logits)
 
-            y_adv_pred = self._classifier(x_adv, training=False)
 
-            loss_adv = tf.reduce_mean(self._classifier.loss(y_batch, y_adv_pred))
+    def _reset_metrics(self):
+        self._clean_loss_metric.reset_state()
+        self._clean_accuracy_metric.reset_state()
+        self._robust_loss_metric.reset_state()
+        self._robust_accuracy_metric.reset_state()
 
-            adv_loss.update_state(loss_adv)
-            adv_acc.update_state(y_batch, y_adv_pred)
 
-        return {
-            "val_loss": clean_loss.result(),
-            "val_adv_loss": adv_loss.result(),
-            "val_acc": clean_acc.result(),
-            "val_adv_acc": adv_acc.result(),
-        }
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        if warmup:
+            return self._trainer.adv_train_step(x_batch, y_batch)
+        else:
+            return self._trainer.awp_train_step(x_batch, y_batch)
 
-    def _dataset_to_iterator(self, dataset):
-        for x_batch, y_batch in dataset:
-            yield x_batch, y_batch
-
-    def _numpy_to_iterator(self, x, y, batch_size):
-        n = len(x)
-        indices = np.arange(n)
-        np.random.shuffle(indices)
-
-        for i in range(0, n, batch_size):
-            batch_idx = indices[i:i + batch_size]
-            yield x[batch_idx], y[batch_idx]
-
-    def _generator_to_iterator(self, generator, nb_batches):
-        for _ in range(nb_batches):
-            x_batch, y_batch = generator.get_batch()
-            yield x_batch, y_batch
 
     def _init_training_object(self):
         attack = pgd.PGDAttack(self._proxy_classifier)
         tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier)
-        return awp_protocol_tf.AWPProtocolTF(
+        return batch_processor.BatchProcessor(
             self._classifier,
             self._proxy_classifier,
             tracked_layers,

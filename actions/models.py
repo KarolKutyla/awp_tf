@@ -43,3 +43,5 @@ def load_torch_resnet():
     torch_resnet.to(device)
     torch_resnet.train()
     return torch_resnet
+
+load_tensorflow_resnet().summary()

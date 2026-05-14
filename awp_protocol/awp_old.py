@@ -42,17 +42,17 @@ from art.utils import check_and_transform_label_format
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
-from awp_protocol import awp_protocol_tf, awp_proxy
-from awp_protocol.attacks import pgd
-from awp_protocol.attacks.attack import TensorflowEvasionAttack
-from awp_protocol.losses.loss_context import LossContext
+from batch_processor import awp_protocol, awp_proxy
+from batch_processor.attacks import pgd
+from batch_processor.attacks.attack import TensorflowEvasionAttack
+from batch_processor.losses.loss_context import LossContext
 
 logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class AWPParams:
-    protocol_params = awp_protocol_tf.AWPProtocolParams()
-    awp_params = awp_proxy.AWPProxyParams()
+    protocol_params = awp_protocol_tf.Params()
+    awp_params = awp_proxy.WeightParams()
 
 class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
     """
@@ -99,7 +99,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         self._epochs_run = 0
         self._callback_list: tf.keras.callbacks.CallbackList
         self._progbar: tf.keras.utils.Progbar
-        self._trainer: awp_protocol_tf.AWPProtocolTF
+        self._trainer: awp_protocol_tf.BatchProcessor
 
         self._fast_mode = True
 
@@ -279,7 +279,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
         if warmup:
             loss, logits =  self._warmup_step(x_batch, y_batch)
         else:
-            loss, logits =  self._trainer.batch_process(x_batch, y_batch)
+            loss, logits =  self._trainer.train_step(x_batch, y_batch)
         self._loss_metric.update_state(loss)
         if not self._fast_mode:
             self._accuracy_metric.update_state(y_batch, logits)
@@ -351,7 +351,7 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
     def _init_training_object(self):
         attack = pgd.PGDAttack(self._proxy_classifier.model)
         tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
-        return awp_protocol_tf.AWPProtocolTF(
+        return awp_protocol_tf.BatchProcessor(
             self._classifier.model,
             self._proxy_classifier.model,
             tracked_layers,
@@ -359,9 +359,9 @@ class AdversarialTrainerAWPTensorflow(AdversarialTrainerAWP):
             self._classifier.optimizer,
             self._params.protocol_params)
 
-    def _create_proxy_calculation_object(self) -> awp_protocol_tf.AWPProxyCalculations:
+    def _create_proxy_calculation_object(self) -> awp_protocol_tf.WeightCalculator:
         tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier.model)
-        return awp_protocol_tf.AWPProxyCalculations(self._proxy_classifier.model, tracked_layers, self._params.awp_params)
+        return awp_protocol_tf.WeightCalculator(self._proxy_classifier.model, tracked_layers, self._params.awp_params)
 
 
 

@@ -1,34 +1,34 @@
 from dataclasses import dataclass, replace
 
 import tensorflow as tf
-from numpy.ma.core import indices
-from tensorflow import keras
-from tensorflow import stack
 
 @dataclass(frozen=True)
-class AWPProxyParams:
+class WeightParams:
     weight_constraint: float = 5.0e-3
-    step_size: float = weight_constraint / 50
+    step_size: float = weight_constraint / 10
 
-class AWPProxyCalculations:
+class WeightCalculator:
     def __init__(
             self,
             originator: tf.keras.Model,
             bound_classifier: tf.keras.Model,
             layers_selected_for_weight_perturbation: tuple[bool, ...],
-            params: AWPProxyParams| None = None,
+            params: WeightParams | None = None,
             **overrides
     ):
-        self._dtype = tf.float32
+        self.step_size: tf.Tensor
+        self._weight_constraint: tf.Tensor
+
+        self._dtype = originator.weights[0].dtype
 
         self._originator = originator
         self._bound_classifier: tf.keras.Model = bound_classifier
 
 
-        self._params = params or AWPProxyParams()
+        self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
-        self.step_size: tf.Tensor = tf.constant(self._params.step_size, dtype=self._dtype)
-        self._weight_constraint: tf.Tensor = tf.constant(self._params.weight_constraint, dtype=self._dtype)
+        self.step_size = tf.constant(self._params.step_size, dtype=self._dtype)
+        self._weight_constraint = tf.constant(self._params.weight_constraint, dtype=self._dtype)
 
         self._trained_layers = layers_selected_for_weight_perturbation
         self._active_indices = [i for i, tracked in enumerate(layers_selected_for_weight_perturbation) if tracked]
@@ -97,11 +97,11 @@ class AWPProxyCalculations:
             self._bound_classifier.trainable_variables[i].assign_sub(self._weight_perturbations[i])
 
 
-def _make_weight_perturbation_storage(classifier: keras.models.Model) -> list[tf.Variable]:
+def _make_weight_perturbation_storage(classifier: tf.keras.models.Model) -> list[tf.Variable]:
     return [tf.Variable(tf.zeros_like(variable), trainable=False) for variable in classifier.trainable_weights]
 
 
-def _make_weight_norms_storage(classifier: keras.models.Model, trained_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
+def _make_weight_norms_storage(classifier: tf.keras.models.Model, trained_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
     return [tf.Variable(tf.norm(variables)) if tracked
             else None for variables, tracked
             in zip(classifier.trainable_variables, trained_layers)]

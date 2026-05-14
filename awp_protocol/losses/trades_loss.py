@@ -11,19 +11,12 @@ class TradesLoss(AdversarialLoss):
             raise Exception(f"Beta parameter must be greater than 0. Passed value is {regularization_parameter}")
         self._regularization_parameter = regularization_parameter
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
-        # self._kl_divergence = tf.keras.losses.KLDivergence(reduction="sum_over_batch_size")
 
     @tf.function
     def calculate(self, loss_context: LossContext) -> tf.Tensor:
-        y = loss_context.y_true
-        logits = loss_context.logits_out
-        logits_adv = loss_context.logits_pert
-        # probabilities = tf.nn.softmax(logits)
-        # probabilities_adv = tf.nn.softmax(logits_adv)
-
-        # min_boundry = self._value_instead_of_zero
-        # max_boundry = tf.dtypes.as_dtype(logits.dtype).max
-        # logits_clipped = tf.clip_by_value(logits, clip_value_min=min_boundry, clip_value_max=max_boundry)
+        y = loss_context.y_batch
+        logits = loss_context.logits_clean
+        logits_adv = loss_context.logits_adv
 
         loss_clean = self._sparse_categorical_cross_entropy(y, logits)
         loss_kl = _kld_loss(logits, logits_adv)
