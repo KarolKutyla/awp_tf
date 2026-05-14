@@ -155,18 +155,17 @@ class AdversarialTrainerAWPTensorflow:
         logger.info("Performing adversarial training with AWP with %s protocol", self._params.protocol_params.mode)
 
         for epoch in range(nb_epochs):
-            self._epoch(train_dataset, validation_dataset)
+            self._epoch(train_dataset, epoch + 1, validation_dataset)
 
         self._callback_list.on_train_end()
 
 
-    def _epoch(self, train_dataset: tf.data.Dataset, validation_dataset: tf.data.Dataset | None = None):
-        self._epochs_run += 1
+    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None):
         self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
             self._steps_per_epoch,
-            stateful_metrics=["loss", "accuracy"]
+            stateful_metrics=["loss", "accuracy", "robust_loss", "robust_accuracy"],
         )
         self._logger.update_progbar(self._progbar)
 
@@ -175,14 +174,9 @@ class AdversarialTrainerAWPTensorflow:
         for step, (x_batch, y_batch) in enumerate(train_dataset):
             self._run_batch(x_batch, y_batch, step)
 
-        logs = {
-            "loss": self._clean_loss_metric.result(),
-            "accuracy": self._clean_accuracy_metric.result(),
-            "robust_loss": self._robust_loss_metric.result(),
-            "robust_accuracy": self._robust_accuracy_metric.result(),
-        }
-
+        logs = self._collect_logs()
         if validation_dataset is not None:
+            self._reset_metrics()
             self._run_validation(validation_dataset)
             logs.update({
                 "val_loss": self._clean_loss_metric.result(),
@@ -190,7 +184,6 @@ class AdversarialTrainerAWPTensorflow:
                 "robust_loss": self._robust_loss_metric.result(),
                 "robust_accuracy": self._robust_accuracy_metric.result(),
             })
-
         self._callback_list.on_epoch_end(self._epochs_run, logs)
 
 
@@ -201,11 +194,18 @@ class AdversarialTrainerAWPTensorflow:
         batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
         self._update_metrics(y_batch, batch_results)
 
-        self._callback_list.on_batch_end(self._epochs_run, {"loss": self._clean_loss_metric.result()})
+        self._callback_list.on_batch_end(step, self._collect_logs())
 
+    def _collect_logs(self):
+        logs = {
+            "loss": self._clean_loss_metric.result(),
+            "accuracy": self._clean_accuracy_metric.result(),
+            "robust_loss": self._robust_loss_metric.result(),
+            "robust_accuracy": self._robust_accuracy_metric.result(),
+        }
+        return logs
 
     def _run_validation(self, validation_dataset):
-        self._reset_metrics()
         for x_batch, y_batch in validation_dataset:
             batch_results = self._trainer.validation_step(x_batch, y_batch)
             self._update_metrics(y_batch, batch_results)

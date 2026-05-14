@@ -22,7 +22,7 @@ class ProgBarLogger(tf.keras.callbacks.Callback):
         if "loss" in logs:
             values.append(("loss", float(logs["loss"])))
         if "accuracy" in logs:
-            values.append(("acc", float(logs["accuracy"])))
+            values.append(("accuracy", float(logs["accuracy"])))
         if "robust_loss" in logs:
             values.append(("robust_loss", float(logs["robust_loss"])))
         if "robust_accuracy" in logs:

@@ -7,7 +7,6 @@ class ProgbarLogger(tf.keras.callbacks.Callback):
         super().__init__()
         self._progbar: tf.keras.utils.Progbar | None = None
         self.batch_interval = batch_interval
-        self._epoch = 0
 
 
     def update_progbar(self, progbar: tf.keras.utils.Progbar):
@@ -19,7 +18,6 @@ class ProgbarLogger(tf.keras.callbacks.Callback):
 
         if batch % self.batch_interval == 0 and self._progbar is not None:
             values = self._collect_train_metrics(logs)
-
             self._progbar.update(batch, values)
 
 
