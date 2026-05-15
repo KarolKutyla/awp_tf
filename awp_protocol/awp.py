@@ -26,9 +26,7 @@ from dataclasses import dataclass, replace
 import logging
 
 import tensorflow as tf
-from keras_core.src.utils import progbar
 from tensorflow.keras.callbacks import Callback
-from tensorflow.python.profiler.profiler_v2 import warmup
 
 from awp_protocol import batch_processor
 from awp_protocol.attacks import pgd
@@ -40,7 +38,6 @@ from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.trades_loss import TradesLoss
 from awp_protocol.losses.adversarial_categorical_cross_entropy import AdversarialSparseCategoricalCrossEntropy
 
-logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class Params:
@@ -161,10 +158,8 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list.on_train_begin()
         self._trainer = self._init_training_object()
 
-        logger.info("Performing adversarial training with AWP with %s protocol", self._params.protocol_params.mode)
-
         for epoch in range(nb_epochs):
-            self._epoch(train_dataset, epoch + 1, validation_dataset)
+            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset)
 
         self._callback_list.on_train_end()
 
