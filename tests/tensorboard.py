@@ -4,8 +4,8 @@ from actions import models, datasets, attacks
 
 from awp_protocol.attacks import pgd
 from awp_protocol import awp
+from awp_protocol import batch_processor
 
-import batch_processor
 
 tf.config.run_functions_eagerly(False)
 print(f"tf executing eagerly: {tf.executing_eagerly()}")
@@ -55,7 +55,7 @@ proxy_model = awp.clone_classifier(model)
 params = pgd.PGDParams(pgd_step=1)
 attack = pgd.PGDAttack(proxy_model, params=params)
 
-protocol_params = awp_protocol_tf.Params(awp_steps=1)
+protocol_params = batch_processor.AWPParams(awp_steps=1)
 params = awp.Params(protocol_params=protocol_params)
 trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
 

@@ -18,7 +18,6 @@ from awp_protocol.losses import trades_loss, adversarial_categorical_cross_entro
 class AWPParams:
     alternate_iteration: int = 1
     awp_steps: int = 10
-    mode: str = "trades"
     weight_constraint: float = 5.0e-3
     step_size: float = weight_constraint / (awp_steps * alternate_iteration)
 

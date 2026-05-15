@@ -8,7 +8,6 @@ from tensorflow import keras
 import tensorflow_datasets as tfds
 from tensorflow.keras.datasets import mnist
 
-import torch
 
 def load_cifar_dataset():
     (x_train, y_train), (x_test, y_test) = keras.datasets.cifar10.load_data()
@@ -31,12 +30,9 @@ def load_cifar_dataset():
 
     seed = randrange(1, 1000000)
     np.random.seed(seed)
-    torch.manual_seed(seed)
     tf.random.set_seed(seed)
 
-    torch_train_loader = _convert_to_torch_loader(x_train, y_train, shuffle=True)
-    torch_test_loader = _convert_to_torch_loader(x_test, y_test)
-    return tf_train_ds, tf_test_ds, torch_train_loader, torch_test_loader
+    return tf_train_ds, tf_test_ds
 
 def preprocess(x, y):
     x = tf.cast(x, tf.float32) / 255.0
@@ -60,7 +56,6 @@ def load_mnist_dataset():
 
     seed = randrange(1, 1000000)
     np.random.seed(seed)
-    torch.manual_seed(seed)
     tf.random.set_seed(seed)
 
     x_train = x_train[..., None]  # (N, 28, 28, 1)
@@ -77,17 +72,5 @@ def load_mnist_dataset():
     tf_train_ds = tf_train_ds.shuffle(10000).batch(64, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
     tf_train_ds = tf_train_ds.cache().prefetch(tf.data.AUTOTUNE)
 
-    torch_train_loader = _convert_to_torch_loader(x_train, y_train, shuffle=True)
-    torch_test_loader = _convert_to_torch_loader(x_test, y_test)
-    return tf_train_ds, x_test, y_test, torch_train_loader, torch_test_loader
+    return tf_train_ds, x_test, y_test
 
-def _convert_to_torch_loader(x, y, shuffle=False):
-    x_torch = torch.from_numpy(x).permute(0, 3, 1, 2).float()
-    y_torch = torch.from_numpy(y).squeeze().long()
-    torch_test_dataset = torch.utils.data.TensorDataset(x_torch, y_torch)
-    torch_loader = torch.utils.data.DataLoader(
-        torch_test_dataset,
-        batch_size=64,
-        shuffle=shuffle
-    )
-    return torch_loader

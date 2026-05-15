@@ -1,7 +1,6 @@
 import tensorflow as tf
 from keras.src.optimizers import SGD
 from keras.src.optimizers.schedules import learning_rate_schedule
-from torch._inductor.template_heuristics import params
 
 from actions import models, datasets, attacks
 
@@ -13,7 +12,7 @@ from awp_protocol import batch_processor
 tf.config.run_functions_eagerly(False)
 print(f"tf executing eagerly: {tf.executing_eagerly()}")
 
-train_ds, tf_test_ds, _, _ = datasets.load_cifar_dataset()
+train_ds, tf_test_ds = datasets.load_cifar_dataset()
 model = models.load_tensorflow_resnet()
 
 pgd_attack = pgd.PGDAttack(model)
@@ -39,10 +38,6 @@ labels = {0: "airplane",
 plotter = attacks.AdversarialPlots(pgd_attack, labels)
 plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
-
-input_shape = model.inputs[0].shape[1:]
-
-
 # attack = ProjectedGradientDescentTensorFlowV2(
 #     tfv2_classifier,
 #     norm=np.inf,
@@ -51,15 +46,15 @@ input_shape = model.inputs[0].shape[1:]
 #     max_iter=10,
 #     targeted=False)
 
-
-
 proxy_model = awp.clone_classifier(model)
 
-params = pgd.PGDParams(pgd_step=1)
+params = pgd.PGDParams(perturbation_bound= 8/255, pgd_step=10, pgd_step_size= 2/255)
 attack = pgd.PGDAttack(proxy_model, params=params)
 
-protocol_params = batch_processor.AWPParams(awp_steps=1)
+protocol_params = batch_processor.AWPParams(alternate_iteration=1, awp_steps=10, weight_constraint=5.03-3)
+awp_params = awp.Params(mode="trades", protocol_params=protocol_params)
+
 params = awp.Params(protocol_params=protocol_params)
 trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
 
-trainer.fit_dataset(train_ds, nb_epochs=2)
+trainer.fit_dataset(train_ds, nb_epochs=4)
