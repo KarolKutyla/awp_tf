@@ -10,7 +10,6 @@ from awp_protocol import awp
 from awp_protocol import batch_processor
 
 tf.config.run_functions_eagerly(False)
-print(f"tf executing eagerly: {tf.executing_eagerly()}")
 
 train_ds, tf_test_ds = datasets.load_cifar_dataset()
 model = models.load_tensorflow_resnet()
@@ -48,7 +47,7 @@ plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
 proxy_model = awp.clone_classifier(model)
 
-params = pgd.PGDParams(perturbation_bound= 8/255, pgd_step=10, pgd_step_size= 2/255)
+params = pgd.PGDParams(perturbation_bound= 8/255, pgd_step=10, pgd_step_size= 2/255, norm="linf")
 attack = pgd.PGDAttack(proxy_model, params=params)
 
 protocol_params = batch_processor.AWPParams(alternate_iteration=1, awp_steps=10, weight_constraint=5.03-3)
