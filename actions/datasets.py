@@ -5,8 +5,26 @@ import numpy as np
 import tensorflow as tf
 from tensorflow import keras
 
-import tensorflow_datasets as tfds
 from tensorflow.keras.datasets import mnist
+
+
+def load_cifar_dataset_with_preprocessing():
+    (x_train, y_train), (x_test, y_test) = keras.datasets.cifar10.load_data()
+    tf_train_ds = (
+        tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        .shuffle(50000)
+        .map(transform_train_from_research_paper, num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(128, drop_remainder=True)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    tf_test_ds = (
+        tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        .map(lambda x, y: (tf.cast(x, dtype=tf.float32) / 255.0, y), num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(128, drop_remainder=True)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    return tf_train_ds, tf_test_ds
 
 
 def load_cifar_dataset():
@@ -14,27 +32,41 @@ def load_cifar_dataset():
     tf_train_ds = (
         tf.data.Dataset.from_tensor_slices((x_train, y_train))
         .shuffle(50000)
-        .map(preprocess, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(64, drop_remainder=True)
+        .map(transform_train_from_research_paper, num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(128, drop_remainder=True)
         .prefetch(tf.data.AUTOTUNE)
     )
     tf_test_ds = (
         tf.data.Dataset.from_tensor_slices((x_test, y_test))
         .map(lambda x, y: (tf.cast(x, dtype=tf.float32) / 255.0, y), num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(64, drop_remainder=True)
+        .batch(128, drop_remainder=True)
         .prefetch(tf.data.AUTOTUNE)
     )
 
-    x_train = x_train / 255.0
-    x_test = x_test / 255.0
-
-    seed = randrange(1, 1000000)
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
-
     return tf_train_ds, tf_test_ds
 
-def preprocess(x, y):
+
+def transform_train_from_research_paper(image, label):
+    image = tf.cast(image, tf.float32) / 255.0
+
+    image = tf.pad(
+        image,
+        paddings=[[4, 4], [4, 4], [0, 0]],
+        mode="CONSTANT",
+        constant_values=0
+    )
+
+    image = tf.image.random_crop(
+        image,
+        size=[32, 32, 3]
+    )
+
+    image = tf.image.random_flip_left_right(image)
+
+    return image, label
+
+
+def fancy_preprocess(x, y):
     x = tf.cast(x, tf.float32) / 255.0
 
     x = tf.pad(x, [[4,4],[4,4],[0,0]])
@@ -74,3 +106,16 @@ def load_mnist_dataset():
 
     return tf_train_ds, x_test, y_test
 
+def load_cifar_labels():
+    return {
+        0: "airplane",
+        1: "automobile",
+        2: "bird",
+        3: "cat",
+        4: "deer",
+        5: "dog",
+        6: "frog",
+        7: "horse",
+        8: "ship",
+        9: "truck"
+    }

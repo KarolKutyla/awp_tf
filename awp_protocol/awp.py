@@ -21,6 +21,8 @@ This is a TensorFlow implementation of the Adversarial Weight Perturbation (AWP)
 | Paper link: https://proceedings.neurips.cc/paper/2020/file/1ef91c212e30e14bf125e9374262401f-Paper.pdf
 """
 from __future__ import absolute_import, division, print_function, unicode_literals, annotations
+
+import time
 from dataclasses import dataclass, replace
 
 import logging
@@ -175,19 +177,34 @@ class AdversarialTrainerAWPTensorflow:
 
         self._callback_list.on_epoch_begin(self._epochs_run)
 
+        start_time = time.time()
         warmup = epoch <= self._warmup
         for step, (x_batch, y_batch) in enumerate(train_dataset):
             self._run_batch(x_batch, y_batch, step+1, warmup=warmup)
+        end_time = time.time()
+        train_time = end_time - start_time
 
-        logs = self._collect_logs()
+        logs = self._collect_train_logs()
+        lr = None
+        if self._classifier.optimizer is not None:
+            lr = self._classifier.optimizer.learning_rate
+        logs.update({
+            "train_time": train_time,
+            "lr": lr,
+        })
+
         if validation_dataset is not None:
             self._reset_metrics()
+            start_time = time.time()
             self._run_validation(validation_dataset)
+            end_time = time.time()
+            validation_time = end_time - start_time
             logs.update({
                 "val_loss": self._clean_loss_metric.result(),
                 "val_accuracy": self._clean_accuracy_metric.result(),
-                "robust_loss": self._robust_loss_metric.result(),
-                "robust_accuracy": self._robust_accuracy_metric.result(),
+                "val_robust_loss": self._robust_loss_metric.result(),
+                "val_robust_accuracy": self._robust_accuracy_metric.result(),
+                "val_time": validation_time,
             })
 
         self._progbar.update(self._steps_per_epoch, finalize=True)
@@ -200,9 +217,9 @@ class AdversarialTrainerAWPTensorflow:
         batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
         self._update_metrics(y_batch, batch_results)
 
-        self._callback_list.on_batch_end(step, self._collect_logs())
+        self._callback_list.on_batch_end(step, self._collect_train_logs())
 
-    def _collect_logs(self):
+    def _collect_train_logs(self):
         logs = {
             "loss": self._clean_loss_metric.result(),
             "accuracy": self._clean_accuracy_metric.result(),

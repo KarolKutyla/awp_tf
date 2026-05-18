@@ -1,7 +1,7 @@
 import tensorflow as tf
 import keras_cv
 
-def load_tensorflow_resnet():
+def load_tensorflow_resnet(steps_per_epoch):
     backbone = keras_cv.models.ResNet18Backbone(
         include_rescaling=False,
         input_shape=(32, 32, 3)
@@ -14,7 +14,7 @@ def load_tensorflow_resnet():
     keras_resnet = tf.keras.Model(backbone.inputs, outputs)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
-        boundaries=[5000, 10000],
+        boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
         values=[0.1, 0.01, 0.001]
     )
     optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)

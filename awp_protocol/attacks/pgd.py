@@ -1,5 +1,3 @@
-from typing import Any
-
 import tensorflow as tf
 
 from dataclasses import dataclass, replace
@@ -31,12 +29,21 @@ class PGDAttack(TensorflowEvasionAttack):
         self._pgd_step: int = self._params.pgd_step
         self._pgd_step_size: tf.Tensor = tf.constant(self._params.pgd_step_size, dtype=self._dtype)
 
+
+    def _norm_indices(self, x_batch: tf.Tensor) -> tuple:
+        batch_dim = tuple(x_batch.shape[0])
+        single_x_dim = tuple(1 for _ in range(len(x_batch.shape) - 1))
+        return batch_dim + single_x_dim
+
+
     @tf.function(reduce_retracing=True)
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         if self._params.norm == "linf":
             return self._generate_inf(x_batch, y_batch)
         if self._params.norm == "l2":
             return self._generate_l2(x_batch, y_batch)
+        if self._params.norm == "l1":
+            raise Exception("Norm l1 not implemented")
         raise Exception(f"Unknown norm type: {self._params.norm}. Should be one of: linf, l2, l1.")
 
 
@@ -48,10 +55,11 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _pgd_l2_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        gradient = self._gradient(x_adv, y)
-        flat = tf.reshape(gradient, [tf.shape(gradient)[0], -1])
-        grad_norm = tf.norm(flat, axis=1, keepdims=True)
-        gradient = (tf.math.divide_no_nan(gradient, grad_norm))
+        norm_indices = tuple(range(1, len(x_adv.shape)))
+
+        gradient = self._calculate_gradient(x_adv, y)
+        gradient_norm = tf.sqrt(tf.reduce_sum(tf.square(gradient), axis=norm_indices, keepdims=True))
+        gradient = (tf.math.divide_no_nan(gradient, gradient_norm))
         x_adv = x_adv + gradient * self._pgd_step_size
 
         perturbation = x_adv - x
@@ -62,13 +70,14 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _project_l2(self, perturbation):
-        flat = tf.reshape(perturbation, [tf.shape(perturbation)[0], -1])
-
-        pert_norm = tf.norm(flat, axis=1, keepdims=True)
+        norm_indices = tuple(range(1, len(perturbation.shape)))
+        pert_norm = tf.sqrt(tf.reduce_sum(tf.square(perturbation), axis=norm_indices, keepdims=True))
+        factor_ones = tf.ones_like(pert_norm)
+        factor_bounds = tf.ones_like(pert_norm) * self._perturbation_bound
 
         factor = tf.minimum(
-            1.0,
-            self._perturbation_bound / (pert_norm + 1e-12)
+            factor_ones,
+            tf.math.divide_no_nan(factor_bounds, pert_norm)
         )
         return perturbation * factor
 
@@ -81,7 +90,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _pgd_linf_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        gradient = self._gradient(x_adv, y)
+        gradient = self._calculate_gradient(x_adv, y)
         gradient = tf.sign(gradient)
         x_adv = x_adv + gradient * self._pgd_step_size
 
@@ -100,7 +109,7 @@ class PGDAttack(TensorflowEvasionAttack):
         )
 
 
-    def _gradient(self, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
+    def _calculate_gradient(self, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
         with tf.GradientTape() as tape:
             tape.watch(x_adv)
             logits = self.model(x_adv, training=False)

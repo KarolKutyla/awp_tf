@@ -60,3 +60,10 @@ params = awp.Params(protocol_params=protocol_params)
 trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
 
 tensor_func = trainer._train_step
+
+
+from awp_protocol import awp
+
+print(awp.Params)
+
+print(awp.Params.protocol_params)
