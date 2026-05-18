@@ -24,3 +24,6 @@ def load_tensorflow_resnet(steps_per_epoch):
     # print(keras_resnet.summary())
 
     return keras_resnet
+
+model = load_tensorflow_resnet(10)
+print(model.summary())

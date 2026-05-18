@@ -39,4 +39,4 @@ save_callback = checkpoint_callback.EpochCheckpoint(f"checkpoints/{proxy_model.n
 epoch_logger_callback = epoch_logger.EpochLogger(save_filepath=f"logs/{proxy_model.name}/logs.txt", attack_params=attack_params, training_params=awp_params)
 callbacks = [save_callback, epoch_logger_callback]
 
-trainer.fit_dataset(train_ds, nb_epochs=200, callbacks=callbacks)
+trainer.fit_dataset(train_ds, validation_dataset=tf_test_ds, nb_epochs=200, callbacks=callbacks)
