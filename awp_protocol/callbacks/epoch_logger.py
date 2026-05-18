@@ -26,7 +26,7 @@ class EpochLogger(tf.keras.callbacks.Callback):
 
 
     def _init_log_file(self):
-        os.makedirs(self._save_filepath, exist_ok=True)
+        os.makedirs(os.path.dirname(self._save_filepath), exist_ok=True)
         with open(self._save_filepath, "w") as log_file:
             log_file.write(f"attack parameters: {self._attack_params}, training parameters: {self._training_params}")
             log_file.write("Epoch\tTrain Time\tTest Time\tLR\tTrain Loss\tTrain Acc\tTrain Robust Loss\tTrain Robust Acc\tTest Loss\tTest Acc\tTest Robust Loss\tTest Robust Acc\n")
