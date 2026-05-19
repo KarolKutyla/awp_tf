@@ -32,7 +32,7 @@ def load_preact_resnet_18(steps_per_epoch):
     model = preact_resnet_18.PreActResNet18(
         input_shape=(32, 32, 3),
         num_classes=10,
-        width_mult=5
+        width_mult=1
     )
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(

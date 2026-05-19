@@ -6,26 +6,23 @@ from tensorflow.keras import layers
 # ---------------------------
 # PreAct Residual Block
 # ---------------------------
-def preact_resnet_block(x, filters, stride=1, width_mult=1):
+def preact_resnet_block(x, filters, stride=1):
     bn1 = layers.BatchNormalization()(x)
     act1 = layers.Activation("relu")(bn1)
 
     shortcut = x
 
-    # scaled filters
-    f = int(filters * width_mult)
-
     # first conv
-    y = layers.Conv2D(f, 3, stride, padding="same", use_bias=False)(act1)
+    y = layers.Conv2D(filters, 3, stride, padding="same", use_bias=False)(act1)
     y = layers.BatchNormalization()(y)
     y = layers.Activation("relu")(y)
 
     # second conv
-    y = layers.Conv2D(f, 3, 1, padding="same", use_bias=False)(y)
+    y = layers.Conv2D(filters, 3, 1, padding="same", use_bias=False)(y)
 
     # shortcut projection if needed
-    if stride != 1 or x.shape[-1] != f:
-        shortcut = layers.Conv2D(f, 1, stride, use_bias=False)(act1)
+    if stride != 1 or x.shape[-1] != filters:
+        shortcut = layers.Conv2D(filters, 1, stride, use_bias=False)(act1)
 
     out = layers.Add()([y, shortcut])
     return out
@@ -34,27 +31,27 @@ def preact_resnet_block(x, filters, stride=1, width_mult=1):
 # ---------------------------
 # Stage (stack of blocks)
 # ---------------------------
-def make_stage(x, filters, blocks, stride, width_mult):
-    x = preact_resnet_block(x, filters, stride=stride, width_mult=width_mult)
+def make_stage(x, filters, blocks, stride):
+    x = preact_resnet_block(x, filters, stride=stride)
     for _ in range(1, blocks):
-        x = preact_resnet_block(x, filters, stride=1, width_mult=width_mult)
+        x = preact_resnet_block(x, filters, stride=1)
     return x
 
 
 # ---------------------------
 # PreActResNet18
 # ---------------------------
-def PreActResNet18(input_shape=(32, 32, 3), num_classes=10, width_mult=10):
+def PreActResNet18(input_shape=(32, 32, 3), num_classes=10, width_mult=1):
     inputs = keras.Input(shape=input_shape)
 
     # initial conv
     x = layers.Conv2D(64, 3, padding="same", use_bias=False)(inputs)
 
     # ResNet18 structure
-    x = make_stage(x, 64, 2, stride=1, width_mult=width_mult)
-    x = make_stage(x, 128, 2, stride=2, width_mult=width_mult)
-    x = make_stage(x, 256, 2, stride=2, width_mult=width_mult)
-    x = make_stage(x, 512, 2, stride=2, width_mult=width_mult)
+    x = make_stage(x, 64 * width_mult, 2, stride=1)
+    x = make_stage(x, 128 * width_mult, 2, stride=2)
+    x = make_stage(x, 256 * width_mult, 2, stride=2)
+    x = make_stage(x, 512 * width_mult, 2, stride=2)
 
     # head
     x = layers.BatchNormalization()(x)
