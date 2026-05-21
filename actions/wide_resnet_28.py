@@ -78,7 +78,7 @@ def WideResNet28_10(input_shape=(32, 32, 3), num_classes=10, drop_rate=0.0):
     x = make_block_group(x, 640, num_blocks=4, stride=2, drop_rate=drop_rate)
 
     x = layers.BatchNormalization()(x)
-    x = tf.nn.relu(x)
+    x = layers.Activation("relu")(x)
 
     x = layers.GlobalAveragePooling2D()(x)
     outputs = layers.Dense(num_classes)(x)
