@@ -19,13 +19,13 @@ def load_imagenette_dataset():
         ds_train
         .shuffle(10_000)
         .map(preprocess_train, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(64, drop_remainder=False)
+        .batch(1, drop_remainder=False)
         .prefetch(tf.data.AUTOTUNE)
     )
     test_ds = (
         ds_test
         .map(preprocess_test, num_parallel_calls=tf.data.AUTOTUNE)
-        .batch(64, drop_remainder=False)
+        .batch(1, drop_remainder=False)
         .prefetch(tf.data.AUTOTUNE)
     )
 
