@@ -25,13 +25,11 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 import time
 from dataclasses import dataclass, replace
 
-import logging
-
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
 from awp_protocol import batch_processor
-from awp_protocol.attacks import pgd
+from attacks.v1 import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.callbacks.progbar_logger import ProgbarLogger
 from awp_protocol.callbacks.checkpoint_callback import EpochCheckpoint

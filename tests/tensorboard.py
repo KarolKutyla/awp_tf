@@ -1,8 +1,8 @@
 import tensorflow as tf
 
-from actions import models, datasets, attacks
+from actions import models
 
-from awp_protocol.attacks import pgd
+from attacks.v1 import pgd
 from awp_protocol import awp
 from awp_protocol import batch_processor
 

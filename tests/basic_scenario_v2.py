@@ -1,28 +1,28 @@
 import tensorflow as tf
 
-from actions import models, datasets, attacks
+from actions import models, datasets_v2, attacks
 
-from attacks.v1 import pgd
+from attacks.v2 import pgd
 from awp_protocol import awp
 from awp_protocol import batch_processor
 from awp_protocol.callbacks import checkpoint_callback, epoch_logger
 
 tf.config.run_functions_eagerly(False)
 
-train_ds, tf_test_ds = datasets.load_cifar_dataset()
+train_ds, tf_test_ds = datasets_v2.load_imagenette_dataset()
 steps_per_epoch = train_ds.cardinality()
-model = models.load_preact_resnet_18(steps_per_epoch)
+model = models.load_tensorflow_resnet_152(steps_per_epoch)
 
-attack_params = pgd.PGDParams(perturbation_bound=128 / 255, pgd_step=10, pgd_step_size=15 / 255, norm="l2")
+attack_params = pgd.PGDParams(perturbation_bound=128/255, pgd_step=10, pgd_step_size=15/255, norm="l2")
 pgd_attack = pgd.PGDAttack(model, attack_params)
 x_batch, y_batch = next(iter(train_ds))
 x_adv = pgd_attack.generate(x_batch, y_batch)
 tf_evaluation_clean = model.evaluate(x_batch, y_batch)
 tf_evaluation_adv = model.evaluate(x_adv, y_batch)
 
-labels = datasets.load_cifar_labels()
-plotter = attacks.AdversarialPlots(pgd_attack, labels)
-plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
+# labels = datasets.load_cifar_labels()
+# plotter = attacks.AdversarialPlots(pgd_attack, labels)
+# plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
 
 proxy_model = awp.clone_classifier(model)

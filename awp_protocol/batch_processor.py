@@ -2,16 +2,12 @@ from dataclasses import dataclass, replace
 
 import tensorflow as tf
 from tensorflow import keras
-from tensorflow.python.training import training
 
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
-from awp_protocol.attacks.pgd import PGDAttack
 from awp_protocol.weight_calculator import WeightCalculator, WeightParams
 
 from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
-from awp_protocol.losses import trades_loss, adversarial_categorical_cross_entropy
-
 
 
 @dataclass(frozen=True)

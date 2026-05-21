@@ -8,5 +8,7 @@ setup(
         "tensorflow",
         "keras-hub",
         "keras-cv",
+        "tensorflow-datasets",
+        "importlib-resources"
     ],
 )
