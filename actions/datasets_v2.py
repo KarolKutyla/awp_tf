@@ -56,34 +56,7 @@ def preprocess_test(image, label):
     image = image / 127.5 - 1.0
     return image, label
 
-    return x, y
 
-def load_mnist_dataset():
-    (x_train, y_train), (x_test, y_test) = mnist.load_data()
-    x_train = x_train / 255.0
-    x_test = x_test / 255.0
-    # y_train = y_train.reshape(-1)
-    # y_test = y_test.reshape(-1)
-
-    seed = randrange(1, 1000000)
-    np.random.seed(seed)
-    tf.random.set_seed(seed)
-
-    x_train = x_train[..., None]  # (N, 28, 28, 1)
-    x_train = np.repeat(x_train, 3, axis=-1)  # (N, 28, 28, 3)
-    x_train = tf.image.resize(x_train, (32, 32)).numpy()
-    x_test = x_test[..., None]  # (N, 28, 28, 1)
-    x_test = np.repeat(x_test, 3, axis=-1)  # (N, 28, 28, 3)
-    x_test = tf.image.resize(x_test, (32, 32)).numpy()
-
-    tf_x_train = x_train.astype(np.float32)
-    tf_x_test = x_test.astype(np.float32)
-
-    tf_train_ds = tf.data.Dataset.from_tensor_slices((tf_x_train, y_train))
-    tf_train_ds = tf_train_ds.shuffle(10000).batch(64, drop_remainder=True).prefetch(tf.data.AUTOTUNE)
-    tf_train_ds = tf_train_ds.cache().prefetch(tf.data.AUTOTUNE)
-
-    return tf_train_ds, x_test, y_test
 
 def load_cifar_labels():
     return {
@@ -98,3 +71,41 @@ def load_cifar_labels():
         8: "ship",
         9: "truck"
     }
+
+def load_cifar_dataset():
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+    tf_train_ds = (
+        tf.data.Dataset.from_tensor_slices((x_train, y_train))
+        .shuffle(50000)
+        .map(transform_train_from_research_paper, num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(128, drop_remainder=False)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+    tf_test_ds = (
+        tf.data.Dataset.from_tensor_slices((x_test, y_test))
+        .map(lambda x, y: (tf.cast(x, dtype=tf.float32) / 127.5 - 1.0, y), num_parallel_calls=tf.data.AUTOTUNE)
+        .batch(128, drop_remainder=False)
+        .prefetch(tf.data.AUTOTUNE)
+    )
+
+    return tf_train_ds, tf_test_ds
+
+
+def transform_train_from_research_paper(image, label):
+    image = tf.cast(image, tf.float32) / 127.5 - 1.0
+
+    image = tf.pad(
+        image,
+        paddings=[[4, 4], [4, 4], [0, 0]],
+        mode="CONSTANT",
+        constant_values=0
+    )
+
+    image = tf.image.random_crop(
+        image,
+        size=[32, 32, 3]
+    )
+
+    image = tf.image.random_flip_left_right(image)
+
+    return image, label
