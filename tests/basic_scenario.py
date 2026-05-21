@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from actions import models, datasets, attacks
 
-from attacks.v1 import pgd
+from awp_protocol.attacks.v1 import pgd
 from awp_protocol import awp
 from awp_protocol import batch_processor
 from awp_protocol.callbacks import checkpoint_callback, epoch_logger
