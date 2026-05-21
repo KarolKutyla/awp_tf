@@ -1,6 +1,7 @@
 from dataclasses import dataclass, replace
 
 import tensorflow as tf
+from pygments.lexers import factor
 from tensorflow import keras
 
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
@@ -46,8 +47,8 @@ class BatchProcessor:
         weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=self._params.step_size)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params)
 
-        self._alternate_iteration: int = self._params.alternate_iteration
-        self._awp_steps: int = self._params.awp_steps
+        self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
+        self._awp_steps = tf.constant(self._params.awp_steps, dtype=tf.int32)
 
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
@@ -91,24 +92,24 @@ class BatchProcessor:
 
     def _calc_weight_perturbation(self, x_batch, y_batch) -> tf.Tensor:
         x_adv = x_batch
-        i0 = tf.constant(0, dtype=tf.int8)
+        i0 = tf.constant(0, dtype=tf.int32)
 
         def cond(i, x):
-            return i < tf.constant(self._alternate_iteration, dtype=tf.int8)
+            return i < self._alternate_iteration
 
         def body(i, x):
             x = self._attack.generate(x_batch, y_batch)
             self._awp_iterations(x_batch, y_batch, x_adv)
             return i + 1, x
 
-        tf.while_loop(cond, body, [i0, x_adv])
+        tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
         return x_adv
 
 
     def _awp_iterations(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
-        i0 = tf.constant(0, dtype=tf.int8)
+        i0 = tf.constant(0, dtype=tf.int32)
         def cond(i):
-            return i < tf.constant(self._awp_steps, dtype=tf.int8)
+            return i < self._awp_steps
 
         def body(i):
             with tf.GradientTape() as tape:
@@ -116,9 +117,9 @@ class BatchProcessor:
                 loss = self._robust_loss.calculate(ctx)
             gradient = tape.gradient(loss, self._classifier.trainable_variables)
             self._weight_calculator.calculate_and_update_weight_perturbations(gradient)
-            return i
+            return i + 1
 
-        tf.while_loop(cond, body, [i0])
+        tf.while_loop(cond, body, [i0], parallel_iterations=1, back_prop=False)
 
         # for j in range(self._awp_steps):
         #     with tf.GradientTape() as tape:

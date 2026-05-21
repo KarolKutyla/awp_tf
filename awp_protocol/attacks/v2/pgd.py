@@ -56,7 +56,7 @@ class PGDAttack(TensorflowEvasionAttack):
         def body(i, x):
             x = self._pgd_l2_iteration(x_batch, x_adv, y_batch)
             return i + 1, x
-        tf.while_loop(cond, body, [i0, x_adv])
+        tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
         return x_adv
         # for i in range(self._pgd_step):
         #     x_adv = self._pgd_l2_iteration(x_batch, x_adv, y_batch)
@@ -125,7 +125,6 @@ class PGDAttack(TensorflowEvasionAttack):
             loss = tf.keras.losses.sparse_categorical_crossentropy(y, logits, from_logits=True)
             loss = tf.reduce_mean(loss)
         gradient = tape.gradient(loss, x_adv)
-        tf.stop_gradient(gradient)
         return gradient
 
 
