@@ -116,8 +116,8 @@ class BatchProcessor:
                 loss = self._robust_loss.calculate(ctx)
             gradient = tape.gradient(loss, self._classifier.trainable_variables)
             self._weight_calculator.calculate_and_update_weight_perturbations(gradient)
-        
-        tf.while_loop(cond, body, [i0])
+
+        tf.while_loop(cond, body, i0)
 
         # for j in range(self._awp_steps):
         #     with tf.GradientTape() as tape:
