@@ -31,7 +31,7 @@ def load_tensorflow_resnet(steps_per_epoch):
 def load_tensorflow_resnet_152(steps_per_epoch):
     backbone = keras_cv.models.ResNet152V2Backbone(
         include_rescaling=False,
-        input_shape=(32, 32, 3)
+        input_shape=(224, 224, 3)
     )
 
     x = backbone.outputs[0]
