@@ -7,8 +7,17 @@ from tensorflow.keras import layers
 # Residual Block
 # ---------------------------
 class WRNBlock(layers.Layer):
-    def __init__(self, filters, stride, drop_rate=0.0):
-        super().__init__()
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            "filters": self.filters,
+            "stride": self.stride,
+            "drop_rate": self.drop_rate,
+        })
+        return config
+
+    def __init__(self, filters, stride, drop_rate=0.0, **kwargs):
+        super().__init__(**kwargs)
         self.filters = filters
         self.stride = stride
         self.drop_rate = drop_rate
