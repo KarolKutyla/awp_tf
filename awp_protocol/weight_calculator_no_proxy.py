@@ -1,0 +1,90 @@
+from dataclasses import dataclass, replace
+
+import tensorflow as tf
+
+@dataclass(frozen=True)
+class WeightParams:
+    weight_constraint: float = 5.0e-3
+    step_size: float = weight_constraint / 10
+
+class WeightCalculator:
+    def __init__(
+            self,
+            classifier: tf.keras.Model,
+            layers_selected_for_weight_perturbation: tuple[bool, ...],
+            params: WeightParams | None = None,
+            **overrides
+    ):
+        self.step_size: tf.Tensor
+        self._weight_constraint: tf.Tensor
+
+        self._dtype = classifier.weights[0].dtype
+
+        self._classifier = classifier
+
+        self._params = params or WeightParams()
+        self._params = replace(self._params, **overrides)
+        self.step_size = tf.constant(self._params.step_size, dtype=self._dtype)
+        self._weight_constraint = tf.constant(self._params.weight_constraint, dtype=self._dtype)
+
+        self._perturbed_layers = layers_selected_for_weight_perturbation
+        self._perturbed_variables = [i for i, tracked in enumerate(layers_selected_for_weight_perturbation) if tracked]
+
+        self._weight_perturbations: list[tf.Variable | None] = \
+            _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
+        self._weight_norms: list[tf.Variable | None] = \
+            _make_weight_norms_storage(self._classifier, self._perturbed_layers)
+
+
+    def reset_weight_perturbations(self) -> None:
+        for i in self._perturbed_variables:
+            self._weight_norms[i].assign(tf.norm(self._classifier.trainable_variables[i]))
+            self._weight_perturbations[i].assign(tf.zeros_like(self._weight_perturbations[i]))
+
+
+    def calculate_and_update_weight_perturbations(self, gradient: list[tf.Tensor]):
+        for idx in self._perturbed_variables:
+            if gradient[idx] is not None:
+                new_perturbation = self._calculate_perturbation_for_single_trainable_variable(gradient[idx], idx)
+                self._classifier.trainable_weights[idx].assign_sub(self._weight_perturbations[idx])
+                self._weight_perturbations[idx].assign(new_perturbation)
+                self._classifier.trainable_variables[idx].assign_add(new_perturbation)
+
+
+    def subtract_weight_perturbations(self) -> None:
+        for i in self._perturbed_variables:
+            self._classifier.trainable_variables[i].assign_sub(self._weight_perturbations[i])
+
+
+    def _calculate_perturbation_for_single_trainable_variable(self, weight_gradient: tf.Tensor, idx) -> tf.Tensor:
+        weight_perturbation = self._calculate_initial_perturbation(weight_gradient, idx)
+        weight_perturbation = self._weight_perturbations[idx] + weight_perturbation
+        return self._scale_perturbation_to_bound(weight_perturbation, idx)
+
+
+    def _calculate_initial_perturbation(self, weight_gradient: tf.Tensor, idx):
+        gradient_norm = tf.norm(weight_gradient)
+        normalized_gradient = tf.math.divide_no_nan(weight_gradient, gradient_norm)
+        weight_perturbation = self.step_size * normalized_gradient * self._weight_norms[idx]
+        return weight_perturbation
+
+
+    def _scale_perturbation_to_bound(self, weight_perturbation: tf.Tensor, idx) -> tf.Tensor:
+        perturbation_norm = tf.norm(weight_perturbation)
+        scale_factor = tf.math.divide_no_nan(self._weight_norms[idx], perturbation_norm) * self._weight_constraint
+        scale_factor = tf.minimum(tf.constant(1.0, dtype=scale_factor.dtype), scale_factor)
+        return weight_perturbation * scale_factor
+
+
+def _make_weight_perturbation_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
+    return [
+        tf.Variable(tf.zeros_like(variable), trainable=False) if perturbed_layers else None
+        for variable, perturbed in zip(classifier.trainable_weights, perturbed_layers)
+    ]
+
+
+def _make_weight_norms_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
+    return [
+        tf.Variable(tf.norm(variables)) if perturbed else None
+        for variables, perturbed in zip(classifier.trainable_variables, perturbed_layers)
+    ]

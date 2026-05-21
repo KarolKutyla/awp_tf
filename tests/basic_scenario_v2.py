@@ -3,15 +3,15 @@ import tensorflow as tf
 from actions import models, datasets_v2, attacks
 
 from awp_protocol.attacks.v2 import pgd
-from awp_protocol import awp
-from awp_protocol import batch_processor
+from awp_protocol import awp_no_proxy
+from awp_protocol import batch_processor_no_proxy
 from awp_protocol.callbacks import checkpoint_callback, epoch_logger
 
 tf.config.run_functions_eagerly(False)
 
-train_ds, tf_test_ds = datasets_v2.load_imagenette_dataset()
+train_ds, tf_test_ds = datasets_v2.load_cifar_dataset()
 steps_per_epoch = train_ds.cardinality()
-model = models.load_tensorflow_resnet_152(steps_per_epoch)
+model = models.load_wide_resnet(steps_per_epoch)
 
 attack_params = pgd.PGDParams(perturbation_bound=128/255, pgd_step=10, pgd_step_size=15/255, norm="l2")
 pgd_attack = pgd.PGDAttack(model, attack_params)
@@ -24,19 +24,14 @@ tf_evaluation_adv = model.evaluate(x_adv, y_batch)
 # plotter = attacks.AdversarialPlots(pgd_attack, labels)
 # plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
 
-
-proxy_model = awp.clone_classifier(model)
-
-attack = pgd.PGDAttack(proxy_model, params=attack_params)
-
 protocol_params = batch_processor.AWPParams(alternate_iteration=1, awp_steps=1, weight_constraint=1.0e-2)
 awp_params = awp.Params(mode="trades", protocol_params=protocol_params)
 
 params = awp.Params(protocol_params=protocol_params)
-trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
+trainer = awp.AdversarialTrainerAWPTensorflow(model, pgd_attack, warmup=0, params=params)
 
-save_callback = checkpoint_callback.EpochCheckpoint(f"checkpoints/{proxy_model.name}")
-epoch_logger_callback = epoch_logger.EpochLogger(save_filepath=f"logs/{proxy_model.name}/logs.txt", attack_params=attack_params, training_params=awp_params)
+save_callback = checkpoint_callback.EpochCheckpoint(f"checkpoints/{model.name}")
+epoch_logger_callback = epoch_logger.EpochLogger(save_filepath=f"logs/{model.name}/logs.txt", attack_params=attack_params, training_params=awp_params)
 callbacks = [save_callback, epoch_logger_callback]
 
-trainer.fit_dataset(train_ds, validation_dataset=tf_test_ds, nb_epochs=200, callbacks=callbacks)
+trainer.fit_dataset(train_ds, validation_dataset=tf_test_ds, nb_epochs=5, callbacks=callbacks)
