@@ -29,7 +29,7 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
 from awp_protocol import batch_processor
-from attacks.v1 import pgd
+from awp_protocol.attacks.v1 import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.callbacks.progbar_logger import ProgbarLogger
 from awp_protocol.callbacks.checkpoint_callback import EpochCheckpoint
