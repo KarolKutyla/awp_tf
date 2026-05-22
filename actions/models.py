@@ -1,5 +1,6 @@
 import tensorflow as tf
 import keras_cv
+from tensorflow.python.training.learning_rate_decay import cosine_decay
 
 from actions import preact_resnet_18
 from actions import wide_resnet_28
@@ -113,21 +114,15 @@ def _load_tensorflow_resnet_18_v2(steps_per_epoch):
         input_shape=(32, 32, 3)
     )
 
-    x = backbone.outputs[0]
-    x = tf.keras.layers.GlobalAveragePooling2D()(x)
-    x = tf.keras.layers.Dense(256)(x)
-    x = tf.keras.layers.BatchNormalization()(x)
-    x = tf.keras.layers.ReLU()(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
+    x = tf.keras.layers.GlobalAveragePooling2D()(backbone.outputs)
     outputs = tf.keras.layers.Dense(10)(x)
-
     model = tf.keras.Model(backbone.inputs, outputs)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
         values=[0.1, 0.01, 0.001]
     )
-    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False, weight_decay=5e-4)
     model.compile(loss=loss, optimizer=optimizer)
     return model
 
