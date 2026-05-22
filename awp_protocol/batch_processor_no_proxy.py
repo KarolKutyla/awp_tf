@@ -102,6 +102,7 @@ class BatchProcessor:
         def body(i, x):
             self._weight_calculator.apply_weight_perturbations()
             x = self._attack.generate(x_batch, y_batch)
+            self._weight_calculator.subtract_weight_perturbations()
             self._awp_iterations(x_batch, y_batch, x)
             return i + 1, x
 
@@ -119,6 +120,7 @@ class BatchProcessor:
             return i < self._awp_steps
 
         def body(i):
+            self._weight_calculator.apply_weight_perturbations()
             with tf.GradientTape() as tape:
                 ctx = self._calc_loss_context(x_batch, y_batch, x_pert)
                 loss = self._robust_loss.calculate(ctx)
