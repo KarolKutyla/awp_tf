@@ -83,7 +83,7 @@ def load_cifar_dataset():
     )
     tf_test_ds = (
         tf.data.Dataset.from_tensor_slices((x_test, y_test))
-        .map(lambda x, y: (tf.keras.applications.resnet_v2.preprocess_input(x), y), num_parallel_calls=tf.data.AUTOTUNE)
+        .map(lambda x, y: (tf.keras.applications.resnet_v2.preprocess_input(tf.cast(x, tf.float32)), tf.cast(y, tf.float32)), num_parallel_calls=tf.data.AUTOTUNE)
         .batch(128, drop_remainder=False)
         .prefetch(tf.data.AUTOTUNE)
     )
@@ -92,6 +92,7 @@ def load_cifar_dataset():
 
 
 def transform_train_from_research_paper(image, label):
+    image = tf.cast(image, tf.float32)
     image = tf.keras.applications.resnet_v2.preprocess_input(image)
     image = tf.pad(
         image,
@@ -107,4 +108,4 @@ def transform_train_from_research_paper(image, label):
 
     image = tf.image.random_flip_left_right(image)
 
-    return image, label
+    return image, tf.cast(label, image.dtype)
