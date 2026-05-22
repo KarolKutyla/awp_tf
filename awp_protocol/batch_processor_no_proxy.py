@@ -94,6 +94,7 @@ class BatchProcessor:
     def _calc_weight_perturbation(self, x_batch, y_batch) -> tf.Tensor:
         x_adv = x_batch
         i0 = tf.constant(0, dtype=tf.int32)
+        invariant_shape = tf.TensorShape([None] + x_batch.shape[1:])
 
         def cond(i, x):
             return i < self._alternate_iteration
@@ -104,10 +105,10 @@ class BatchProcessor:
             self._awp_iterations(x_batch, y_batch, x)
             return i + 1, x
 
-        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False, shape_invariants=[
-            i0.get_shape(),
-            tf.TensorShape([None, 32, 32, 3])  # or dynamic
-        ])
+        _, x_adv = tf.nest.map_structure(
+            tf.stop_gradient,
+            tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, shape_invariants=[i0.get_shape(), invariant_shape])
+        )
         return x_adv
 
 
@@ -126,10 +127,7 @@ class BatchProcessor:
             self._weight_calculator.calculate_weight_perturbations(gradient)
             return i + 1
 
-        _, = tf.while_loop(cond, body, [i0], parallel_iterations=1, back_prop=False, shape_invariants=[
-            i0.get_shape(),
-            # tf.TensorShape([None, 32, 32, 3])  # or dynamic
-        ])
+        _, = tf.while_loop(cond, body, [i0], parallel_iterations=1, back_prop=False)
 
 
     def _calc_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
