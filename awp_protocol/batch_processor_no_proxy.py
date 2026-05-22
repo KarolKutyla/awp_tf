@@ -59,7 +59,7 @@ class BatchProcessor:
         x_adv = self._calc_weight_perturbation(x_batch, y_batch)
         self._weight_calculator.apply_weight_perturbations()
         with tf.GradientTape() as tape:
-            ctx = self._calc_loss_context(x_batch, y_batch, x_adv)
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
             robust_loss = self._robust_loss.calculate(ctx)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
         self._weight_calculator.subtract_weight_perturbations()
@@ -73,7 +73,7 @@ class BatchProcessor:
     def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
         with tf.GradientTape() as tape:
-            ctx = self._calc_loss_context(x_batch, y_batch, x_adv)
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
             robust_loss = self._robust_loss.calculate(ctx)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply(gradient)
@@ -122,7 +122,7 @@ class BatchProcessor:
         def body(i):
             self._weight_calculator.apply_weight_perturbations()
             with tf.GradientTape() as tape:
-                ctx = self._calc_loss_context(x_batch, y_batch, x_pert)
+                ctx = self._calc_awp_loss_context(x_batch, y_batch, x_pert)
                 loss = self._robust_loss.calculate(ctx)
             gradient = tape.gradient(loss, self._classifier.trainable_variables)
             self._weight_calculator.subtract_weight_perturbations()
@@ -135,22 +135,21 @@ class BatchProcessor:
         )
 
 
-    def _calc_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._classifier(x_batch, training=True)
-        logits_adv = self._classifier(x_pert, training=True)
-        ctx = LossContext(
-            x_batch=x_batch,
-            x_adv=x_pert,
-            y_batch=y_batch,
-            logits_clean=logits,
-            logits_adv=logits_adv
-        )
-        return ctx
+    def _calc_awp_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+        return self._calc_loss_context(x_batch, y_batch, x_pert, False)
+
+
+    def _calc_training_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+        return self._calc_loss_context(x_batch, y_batch, x_pert, True)
 
 
     def _calc_validation_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._classifier(x_batch, training=False)
-        logits_adv = self._classifier(x_pert, training=False)
+        return self._calc_loss_context(x_batch, y_batch, x_pert, False)
+
+
+    def _calc_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor, training: bool):
+        logits = self._classifier(x_batch, training=training)
+        logits_adv = self._classifier(x_pert, training=training)
         ctx = LossContext(
             x_batch=x_batch,
             x_adv=x_pert,
@@ -159,7 +158,6 @@ class BatchProcessor:
             logits_adv=logits_adv
         )
         return ctx
-
 
 def _validate_optimizer(classifier: keras.models.Model):
     if classifier.optimizer is None:
