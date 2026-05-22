@@ -48,7 +48,6 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _generate_l2(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
-        x_adv = self._random_sample(x_batch)
         i0 = tf.constant(0, dtype=tf.int32)
 
         def cond(i, x):
@@ -58,7 +57,7 @@ class PGDAttack(TensorflowEvasionAttack):
             x = self._pgd_l2_iteration(x_batch, x, y_batch)
             return i + 1, x
 
-        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
+        _, x_adv = tf.while_loop(cond, body, [i0, self._random_sample()], parallel_iterations=1, back_prop=False)
         return x_adv
 
 
