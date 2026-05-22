@@ -3,6 +3,7 @@ from dataclasses import dataclass, replace
 import tensorflow as tf
 from pygments.lexers import factor
 from tensorflow import keras
+from torch._inductor.template_heuristics import params
 
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.weight_calculator_no_proxy import WeightCalculator, WeightParams
@@ -16,7 +17,7 @@ class AWPParams:
     alternate_iteration: int = 1
     awp_steps: int = 10
     weight_constraint: float = 5.0e-3
-    step_size: float = weight_constraint / (awp_steps * alternate_iteration)
+    step_size: float | None = None
 
     def calc_step_size(self):
         return self.weight_constraint / (self.awp_steps * self.alternate_iteration)
@@ -37,14 +38,14 @@ class BatchProcessor:
         self._dtype : tf.dtypes.DType = classifier.weights[0].dtype
         self._params = params or AWPParams()
         self._params = replace(self._params, **overrides)
-        self._params = replace(self._params, step_size=self._params.calc_step_size())
 
         self._classifier: tf.keras.Model = classifier
         _validate_optimizer(self._classifier)
         self._attack: TensorflowEvasionAttack = attack
         self._robust_loss: AdversarialLoss = adversarial_loss
 
-        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=self._params.step_size)
+        step_size = self._params.step_size or self._params.calc_step_size()
+        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=step_size)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params)
 
         self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
@@ -57,6 +58,7 @@ class BatchProcessor:
     def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         self._weight_calculator.reset_weight_perturbations()
         x_adv = self._calc_weight_perturbation(x_batch, y_batch)
+        self._weight_calculator.apply_weight_perturbations()
         with tf.GradientTape() as tape:
             ctx = self._calc_loss_context(x_batch, y_batch, x_adv)
             robust_loss = self._robust_loss.calculate(ctx)
@@ -98,6 +100,7 @@ class BatchProcessor:
             return i < self._alternate_iteration
 
         def body(i, x):
+            self._weight_calculator.apply_weight_perturbations()
             x = self._attack.generate(x_batch, y_batch)
             self._awp_iterations(x_batch, y_batch, x_adv)
             return i + 1, x
@@ -116,17 +119,11 @@ class BatchProcessor:
                 ctx = self._calc_loss_context(x_batch, y_batch, x_pert)
                 loss = self._robust_loss.calculate(ctx)
             gradient = tape.gradient(loss, self._classifier.trainable_variables)
-            self._weight_calculator.calculate_and_update_weight_perturbations(gradient)
+            self._weight_calculator.subtract_weight_perturbations()
+            self._weight_calculator.calculate_weight_perturbations(gradient)
             return i + 1
 
         tf.while_loop(cond, body, [i0], parallel_iterations=1, back_prop=False)
-
-        # for j in range(self._awp_steps):
-        #     with tf.GradientTape() as tape:
-        #         ctx = self._calc_loss_context(x_batch, y_batch, x_pert)
-        #         loss = self._robust_loss.calculate(ctx)
-        #     gradient = tape.gradient(loss, self._classifier.trainable_variables)
-        #     self._weight_calculator.calculate_and_update_weight_perturbations(gradient)
 
 
     def _calc_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
