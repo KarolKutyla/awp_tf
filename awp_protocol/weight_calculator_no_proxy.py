@@ -27,6 +27,7 @@ class WeightCalculator:
         self._weight_constraint = tf.constant(self._params.weight_constraint, dtype=self._dtype)
 
         self._indices_of_selected_layers = [i for i, tracked in enumerate(self._perturbed_layers) if tracked]
+        # self._saved_weights: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
         self._weight_perturbations: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
         self._weight_norms: list[tf.Variable | None] = _make_weight_norms_storage(self._classifier, self._perturbed_layers)
 

@@ -101,7 +101,7 @@ class BatchProcessor:
 
         def body(i, x):
             self._weight_calculator.apply_weight_perturbations()
-            x = self._attack.generate(x, y_batch)
+            x = self._attack.generate(x_batch, y_batch)
             self._awp_iterations(x_batch, y_batch, x)
             return i + 1, x
 
