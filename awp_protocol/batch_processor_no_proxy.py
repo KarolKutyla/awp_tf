@@ -104,7 +104,10 @@ class BatchProcessor:
             self._awp_iterations(x_batch, y_batch, x)
             return i + 1, x
 
-        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
+        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False, shape_invariants=[
+            i0.get_shape(),
+            tf.TensorShape([None, 32, 32, 3])  # or dynamic
+        ])
         return x_adv
 
 
