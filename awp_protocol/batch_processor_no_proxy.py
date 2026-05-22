@@ -3,13 +3,13 @@ from dataclasses import dataclass, replace
 import tensorflow as tf
 from pygments.lexers import factor
 from tensorflow import keras
-from torch._inductor.template_heuristics import params
 
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.weight_calculator_no_proxy import WeightCalculator, WeightParams
 
 from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
+
 
 
 @dataclass(frozen=True)
@@ -43,15 +43,14 @@ class BatchProcessor:
         _validate_optimizer(self._classifier)
         self._attack: TensorflowEvasionAttack = attack
         self._robust_loss: AdversarialLoss = adversarial_loss
+        self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
         step_size = self._params.step_size or self._params.calc_step_size()
         weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=step_size)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params)
-
         self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
         self._awp_steps = tf.constant(self._params.awp_steps, dtype=tf.int32)
 
-        self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
 
     @tf.function(jit_compile=True)
@@ -63,8 +62,8 @@ class BatchProcessor:
             ctx = self._calc_loss_context(x_batch, y_batch, x_adv)
             robust_loss = self._robust_loss.calculate(ctx)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._classifier.optimizer.apply(gradient)
         self._weight_calculator.subtract_weight_perturbations()
+        self._classifier.optimizer.apply(gradient)
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv

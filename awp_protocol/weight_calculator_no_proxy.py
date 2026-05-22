@@ -75,14 +75,14 @@ class WeightCalculator:
 
 def _make_weight_perturbation_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
     return [
-        tf.Variable(tf.zeros_like(variable), trainable=False) if perturbed_layers else None
+        tf.Variable(tf.zeros_like(variable), trainable=False) if perturbed else None
         for variable, perturbed in zip(classifier.trainable_weights, perturbed_layers)
     ]
 
 
 def _make_weight_norms_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
     return [
-        tf.Variable(tf.norm(variables)) if perturbed else None
+        tf.Variable(tf.norm(variables), trainable=False) if perturbed else None
         for variables, perturbed in zip(classifier.trainable_variables, perturbed_layers)
     ]
 
