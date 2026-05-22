@@ -30,12 +30,6 @@ class PGDAttack(TensorflowEvasionAttack):
         self._pgd_step_size: tf.Tensor = tf.constant(self._params.pgd_step_size * 2.0, dtype=self._dtype)
 
 
-    def _norm_indices(self, x_batch: tf.Tensor) -> tuple:
-        batch_dim = tuple(x_batch.shape[0])
-        single_x_dim = tuple(1 for _ in range(len(x_batch.shape) - 1))
-        return batch_dim + single_x_dim
-
-
     @tf.function(reduce_retracing=True)
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         if self._params.norm == "linf":
@@ -48,6 +42,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _generate_l2(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
+        x_adv = self._random_sample(x_batch)
         i0 = tf.constant(0, dtype=tf.int32)
 
         def cond(i, x):
@@ -57,7 +52,9 @@ class PGDAttack(TensorflowEvasionAttack):
             x = self._pgd_l2_iteration(x_batch, x, y_batch)
             return i + 1, x
 
-        _, x_adv = tf.while_loop(cond, body, [i0, self._random_sample(x_batch)], parallel_iterations=1, back_prop=False)
+        shape = x_batch.shape
+        invariant_shape = list((None, ) + shape[1:])
+        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False, shape_invariants=invariant_shape)
         return x_adv
 
 
