@@ -120,7 +120,7 @@ class BatchProcessor:
             with tf.GradientTape() as tape:
                 # ctx = self._calc_awp_loss_context(x_batch, y_batch, x_pert)
                 logits = self._classifier(x_pert, training=False)
-                loss = self._clean_loss.calculate(logits)
+                loss = self._clean_loss(y_batch, logits)
             gradient = tape.gradient(loss, self._classifier.trainable_variables)
             self._weight_calculator.calculate_weight_perturbations(gradient)
             self._weight_calculator.apply_weight_perturbations()
