@@ -128,7 +128,7 @@ class BatchProcessor:
 
         _, = tf.while_loop(cond, body, [i0], parallel_iterations=1, back_prop=False, shape_invariants=[
             i0.get_shape(),
-            tf.TensorShape([None, 32, 32, 3])  # or dynamic
+            # tf.TensorShape([None, 32, 32, 3])  # or dynamic
         ])
 
 
