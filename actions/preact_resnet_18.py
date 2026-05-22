@@ -41,7 +41,7 @@ def make_stage(x, filters, blocks, stride):
 # ---------------------------
 # PreActResNet18
 # ---------------------------
-def PreActResNet18(input_shape=(32, 32, 3), num_classes=10, width_mult=1):
+def PreActResNet18(input_shape=(32, 32, 3), num_classes=10, width_mult=10):
     inputs = keras.Input(shape=input_shape)
 
     # initial conv

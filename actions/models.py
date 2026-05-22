@@ -83,14 +83,14 @@ def load_preact_resnet_18(steps_per_epoch):
     model = preact_resnet_18.PreActResNet18(
         input_shape=(32, 32, 3),
         num_classes=10,
-        width_mult=1
+        width_mult=10
     )
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
         values=[0.1, 0.01, 0.001]
     )
-    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False)
     model.compile(loss=loss, optimizer=optimizer)
     optimizer.build(model.trainable_variables)
     return model
@@ -104,7 +104,6 @@ def load_wide_resnet(steps_per_epoch):
     )
     optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
     model.compile(loss=loss, optimizer=optimizer)
-    # optimizer.build(model.trainable_variables)
     model.name = "wide_resnet_28_10"
     return model
 
@@ -128,9 +127,8 @@ def _load_tensorflow_resnet_18_v2(steps_per_epoch):
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
         values=[0.1, 0.01, 0.001]
     )
-    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
+    optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False)
     model.compile(loss=loss, optimizer=optimizer)
-    optimizer.build(model.trainable_variables)
     return model
 
 
@@ -178,6 +176,5 @@ def load_tensorflow_resnet_50_v2(steps_per_epoch):
     keras_resnet.compile(loss=loss, optimizer=optimizer)
     optimizer.build(keras_resnet.trainable_variables)
     keras_resnet.name = "resnet_50v2"
-    # print(keras_resnet.summary())
 
     return keras_resnet

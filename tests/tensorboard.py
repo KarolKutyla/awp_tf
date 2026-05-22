@@ -1,69 +1,21 @@
 import tensorflow as tf
 
-from actions import models
+x = tf.Variable(2.0)
+y = tf.Variable(3.0)
+a = tf.Variable(0.0)
 
-from attacks.v1 import pgd
-from awp_protocol import awp
-from awp_protocol import batch_processor
+with tf.GradientTape() as tape:
+    x_sq = x * x
 
+    # Temporarily stop recording to prevent interference
+    with tape.stop_recording():
+        a.assign(y * y + 1)  # This op is ignored by the tape
+    a_sq = 5 * a
+    # Resume or proceed with normal operations
+    z = x_sq + y + a_sq
 
-tf.config.run_functions_eagerly(False)
-print(f"tf executing eagerly: {tf.executing_eagerly()}")
-
-# train_ds, tf_test_ds, _, _ = datasets.load_cifar_dataset()
-model = models.load_tensorflow_resnet()
-
-pgd_attack = pgd.PGDAttack(model)
-
-# x_batch, y_batch = next(iter(train_ds))
-# x_adv = pgd_attack.generate(x_batch, y_batch)
-
-# tf_evaluation_clean = model.evaluate(x_batch, y_batch)
-# tf_evaluation_adv = model.evaluate(x_adv, y_batch)
-#
-#
-# labels = {0: "airplane",
-# 1: "automobile",
-# 2: "bird",
-# 3: "cat",
-# 4: "deer",
-# 5: "dog",
-# 6: "frog",
-# 7: "horse",
-# 8: "ship",
-# 9: "truck" }
-
-# plotter = attacks.AdversarialPlots(pgd_attack, labels)
-# plotter.generate_and_show_adversarial_batch(x_batch, y_batch)
-
-
-input_shape = model.inputs[0].shape[1:]
-
-
-# attack = ProjectedGradientDescentTensorFlowV2(
-#     tfv2_classifier,
-#     norm=np.inf,
-#     eps=8/255,
-#     eps_step=0.01,
-#     max_iter=10,
-#     targeted=False)
-
-
-
-proxy_model = awp.clone_classifier(model)
-
-params = pgd.PGDParams(pgd_step=1)
-attack = pgd.PGDAttack(proxy_model, params=params)
-
-protocol_params = batch_processor.AWPParams(awp_steps=1)
-params = awp.Params(protocol_params=protocol_params)
-trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
-
-tensor_func = trainer._train_step
-
-
-from awp_protocol import awp
-
-print(awp.Params)
-
-print(awp.Params.protocol_params)
+# Calculate gradient
+grads = tape.gradient(a_sq, [a])
+print("dx:", grads[0].numpy())  # 2*x = 4.0
+# print("dy:", grads[1].numpy())
+# print("da:", grads[2].numpy())
