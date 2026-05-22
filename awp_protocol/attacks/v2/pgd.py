@@ -57,7 +57,7 @@ class PGDAttack(TensorflowEvasionAttack):
             x = self._pgd_l2_iteration(x_batch, x, y_batch)
             return i + 1, x
 
-        _, x_adv = tf.while_loop(cond, body, [i0, self._random_sample()], parallel_iterations=1, back_prop=False)
+        _, x_adv = tf.while_loop(cond, body, [i0, self._random_sample(x_batch)], parallel_iterations=1, back_prop=False)
         return x_adv
 
 
