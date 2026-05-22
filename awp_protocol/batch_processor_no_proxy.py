@@ -62,8 +62,8 @@ class BatchProcessor:
             ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
             robust_loss = self._robust_loss.calculate(ctx)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._weight_calculator.subtract_weight_perturbations()
         self._classifier.optimizer.apply(gradient)
+        self._weight_calculator.subtract_weight_perturbations()
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
