@@ -100,16 +100,17 @@ class BatchProcessor:
 
         def body(i, x):
             self._weight_calculator.apply_weight_perturbations()
-            x = self._attack.generate(x_batch, y_batch)
-            self._awp_iterations(x_batch, y_batch, x_adv)
+            x = self._attack.generate(x, y_batch)
+            self._awp_iterations(x_batch, y_batch, x)
             return i + 1, x
 
-        tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
+        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False)
         return x_adv
 
 
-    def _awp_iterations(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
+    def _awp_iterations(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> None:
         i0 = tf.constant(0, dtype=tf.int32)
+
         def cond(i):
             return i < self._awp_steps
 
