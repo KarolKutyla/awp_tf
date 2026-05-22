@@ -1,7 +1,6 @@
 import tensorflow as tf
 import keras_cv
-from tf.keras import layers
-from tensorflow.python.training.learning_rate_decay import cosine_decay
+from tensorflow.keras import layers
 
 from actions import preact_resnet_18
 from actions import wide_resnet_28
