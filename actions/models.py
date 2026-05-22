@@ -1,5 +1,6 @@
 import tensorflow as tf
 import keras_cv
+from tf.keras import layers
 from tensorflow.python.training.learning_rate_decay import cosine_decay
 
 from actions import preact_resnet_18
@@ -114,13 +115,23 @@ def _load_tensorflow_resnet_18_v2(steps_per_epoch):
         input_shape=(32, 32, 3)
     )
 
-    x = tf.keras.layers.GlobalAveragePooling2D()(backbone.outputs)
+
+    pool3 = layers.GlobalAveragePooling2D()(backbone.outputs[0])  # Shape: (Batch, 256)
+    pool4 = layers.GlobalAveragePooling2D()(backbone.outputs[1])  # Shape: (Batch, 512)
+    combined_features = layers.Concatenate()([pool3, pool4])
+    x = tf.keras.layers.GlobalAveragePooling2D()(combined_features)
+    x = tf.keras.layers.ReLU()(x)
+    x = layers.Dropout(0.3)(x)
     outputs = tf.keras.layers.Dense(10)(x)
+
+
+    # 4. Concatenate both feature streams into a single vector
+
     model = tf.keras.Model(backbone.inputs, outputs)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
-        values=[0.1, 0.01, 0.001]
+        values=[0.1, 0.01, 0.001],
     )
     optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False, weight_decay=5e-4)
     model.compile(loss=loss, optimizer=optimizer)
