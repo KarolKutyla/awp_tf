@@ -162,6 +162,10 @@ def load_tensorflow_resnet_50_v2(steps_per_epoch):
 
     x = backbone.outputs[0]
     x = tf.keras.layers.GlobalAveragePooling2D()(x)
+    x = tf.keras.layers.Dense(256)(x)
+    x = tf.keras.layers.BatchNormalization()(x)
+    x = tf.keras.layers.ReLU()(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
     outputs = tf.keras.layers.Dense(10)(x)
 
     keras_resnet = tf.keras.Model(backbone.inputs, outputs)
