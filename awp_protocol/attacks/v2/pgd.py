@@ -44,12 +44,13 @@ class PGDAttack(TensorflowEvasionAttack):
     def _generate_l2(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         x_adv = self._random_sample(x_batch)
         i0 = tf.constant(0, dtype=tf.int32)
+        norm_indices = tuple(range(1, len(x_batch.shape)))
 
         def cond(i, x):
             return i < self._pgd_step
 
         def body(i, x):
-            x = self._pgd_l2_iteration(x_batch, x, y_batch)
+            x = self._pgd_l2_iteration(x_batch, x, y_batch, norm_indices)
             return i + 1, x
 
         shape = x_batch.shape
@@ -58,23 +59,20 @@ class PGDAttack(TensorflowEvasionAttack):
         return x_adv
 
 
-    def _pgd_l2_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        norm_indices = tuple(range(1, len(x_adv.shape)))
-
+    def _pgd_l2_iteration(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor, norm_indices: tuple) -> tf.Tensor:
         gradient = self._calculate_gradient(x_adv, y)
         gradient_norm = tf.sqrt(tf.reduce_sum(tf.square(gradient), axis=norm_indices, keepdims=True))
         gradient = (tf.math.divide_no_nan(gradient, gradient_norm))
         x_adv = x_adv + gradient * self._pgd_step_size
 
         perturbation = x_adv - x
-        perturbation = self._project_l2(perturbation)
+        perturbation = self._project_l2(perturbation, norm_indices)
         x_adv = x + perturbation
         x_adv = tf.clip_by_value(x_adv, -1.0, 1.0)
         return x_adv
 
 
-    def _project_l2(self, perturbation):
-        norm_indices = tuple(range(1, len(perturbation.shape)))
+    def _project_l2(self, perturbation, norm_indices: tuple):
         pert_norm = tf.sqrt(tf.reduce_sum(tf.square(perturbation), axis=norm_indices, keepdims=True))
         factor_ones = tf.ones_like(pert_norm)
         factor_bounds = tf.ones_like(pert_norm) * self._perturbation_bound
