@@ -35,8 +35,7 @@ class WeightCalculator:
     def reset_weight_perturbations(self) -> None:
         for idx in self._indices_of_selected_layers:
             self._saved_weights[idx].assign(self._classifier.trainable_variables[idx])
-            const_zero = tf.zeros_like(self._classifier.trainable_variables[idx])
-            self._weight_perturbations[idx].assign(const_zero)
+            self._weight_perturbations[idx].assign(tf.zeros_like(self._classifier.trainable_variables[idx]))
             self._weight_norms[idx].assign(tf.norm(self._classifier.trainable_variables[idx]))
 
 
