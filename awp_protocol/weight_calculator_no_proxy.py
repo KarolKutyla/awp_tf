@@ -27,20 +27,21 @@ class WeightCalculator:
         self._weight_constraint = tf.constant(self._params.weight_constraint, dtype=self._dtype)
 
         self._indices_of_selected_layers = [i for i, tracked in enumerate(self._perturbed_layers) if tracked]
-        # self._saved_weights: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
+        self._saved_weights: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
         self._weight_perturbations: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
         self._weight_norms: list[tf.Variable | None] = _make_weight_norms_storage(self._classifier, self._perturbed_layers)
 
 
     def reset_weight_perturbations(self) -> None:
-        for i in self._indices_of_selected_layers:
-            self._weight_norms[i].assign(tf.norm(self._classifier.trainable_variables[i]))
-            self._weight_perturbations[i].assign(tf.zeros_like(self._weight_perturbations[i]))
+        for idx in self._indices_of_selected_layers:
+            self._saved_weights[idx].assign(self._classifier.trainable_variables[idx])
+            self._weight_perturbations[idx].assign(0.0)
+            self._weight_norms[idx].assign(tf.norm(self._classifier.trainable_variables[idx]))
 
 
     def apply_weight_perturbations(self):
         for idx in self._indices_of_selected_layers:
-            self._classifier.trainable_variables[idx].assign_add(self._weight_perturbations[idx])
+            self._classifier.trainable_variables[idx].assign(self._saved_weights[idx] + self._weight_perturbations[idx])
 
 
     def subtract_weight_perturbations(self) -> None:
@@ -52,6 +53,11 @@ class WeightCalculator:
         for idx in self._indices_of_selected_layers:
             if gradient[idx] is not None:
                 self._weight_perturbations[idx].assign(self._calculate_perturbation_for_single_trainable_variable(gradient[idx], idx))
+
+
+    def restore_model(self):
+        for idx in self._indices_of_selected_layers:
+            self._classifier.trainable_variables[idx].assign(self._saved_weights[idx])
 
 
     def _calculate_perturbation_for_single_trainable_variable(self, weight_gradient: tf.Tensor, idx) -> tf.Tensor:
