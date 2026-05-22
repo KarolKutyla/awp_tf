@@ -1,95 +1,114 @@
-import tensorflow as tf
 from tensorflow import keras
 from tensorflow.keras import layers
 
+RESIZE_TO = 32
 
-# ---------------------------
-# Residual Block
-# ---------------------------
-class WRNBlock(layers.Layer):
-    def get_config(self):
-        config = super().get_config()
-        config.update({
-            "filters": self.filters,
-            "stride": self.stride,
-            "drop_rate": self.drop_rate,
-        })
-        return config
+SOURCE_BATCH_SIZE = 64
+TARGET_BATCH_SIZE = 3 * SOURCE_BATCH_SIZE  # Reference: Section 3.2
+EPOCHS = 2
 
-    def __init__(self, filters, stride, drop_rate=0.0, **kwargs):
-        super().__init__(**kwargs)
-        self.filters = filters
-        self.stride = stride
-        self.drop_rate = drop_rate
+LEARNING_RATE = 0.03
 
-        self.bn1 = layers.BatchNormalization()
-        self.conv1 = layers.Conv2D(filters, 3, stride, padding="same", use_bias=False)
+WEIGHT_DECAY = 0.0005
+INIT = "he_normal"
+DEPTH = 28
+WIDTH_MULT = 10
 
-        self.bn2 = layers.BatchNormalization()
-        self.conv2 = layers.Conv2D(filters, 3, 1, padding="same", use_bias=False)
+def wide_basic(x, n_input_plane, n_output_plane, stride):
 
-        self.dropout = layers.Dropout(drop_rate) if drop_rate > 0 else None
+    # Shortcut connection: identity function or 1x1
+    # convolutional
+    #  (depends on difference between input & output shape - this
+    #   corresponds to whether we are using the first block in
+    #   each
+    #   group; see `block_series()`).
 
-        self.shortcut = None
+    if n_input_plane != n_output_plane:
 
-    def build(self, input_shape):
-        in_channels = input_shape[-1]
-        if in_channels != self.filters or self.stride != 1:
-            self.shortcut = layers.Conv2D(
-                self.filters, 1, self.stride, padding="same", use_bias=False
-            )
+        x = layers.BatchNormalization()(x)
+        x = layers.Activation("relu")(x)
 
-    def call(self, x, training=False):
+        shortcut = layers.Conv2D(
+            n_output_plane,
+            (1, 1),
+            strides=stride,
+            padding="same",
+            use_bias=False,
+            kernel_initializer=INIT,
+            kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+        )(x)
+
+        convs = layers.Conv2D(
+            n_output_plane,
+            (3, 3),
+            strides=stride,
+            padding="same",
+            use_bias=False,
+            kernel_initializer=INIT,
+            kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+        )(x)
+
+    else:
+
         shortcut = x
 
-        # Pre-activation style (WRN)
-        out = self.bn1(x, training=training)
-        out = tf.nn.relu(out)
-        out = self.conv1(out)
+        convs = layers.BatchNormalization()(x)
+        convs = layers.Activation("relu")(convs)
 
-        out = self.bn2(out, training=training)
-        out = tf.nn.relu(out)
+        convs = layers.Conv2D(
+            n_output_plane,
+            (3, 3),
+            strides=stride,
+            padding="same",
+            use_bias=False,
+            kernel_initializer=INIT,
+            kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+        )(convs)
 
-        if self.dropout:
-            out = self.dropout(out, training=training)
+    convs = layers.BatchNormalization()(convs)
+    convs = layers.Activation("relu")(convs)
 
-        out = self.conv2(out)
+    convs = layers.Conv2D(
+        n_output_plane,
+        (3, 3),
+        strides=1,
+        padding="same",
+        use_bias=False,
+        kernel_initializer=INIT,
+        kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+    )(convs)
 
-        if self.shortcut is not None:
-            shortcut = self.shortcut(shortcut)
-
-        return out + shortcut
-
-
-# ---------------------------
-# WRN Block group
-# ---------------------------
-def make_block_group(x, filters, num_blocks, stride, drop_rate):
-    x = WRNBlock(filters, stride, drop_rate)(x)
-    for _ in range(num_blocks - 1):
-        x = WRNBlock(filters, 1, drop_rate)(x)
-    return x
+    return layers.Add()([convs, shortcut])
 
 
-# ---------------------------
-# WRN-28-10 model
-# ---------------------------
-def WideResNet28_10(input_shape=(32, 32, 3), num_classes=10, drop_rate=0.0):
-    inputs = keras.Input(shape=input_shape)
+def get_network():
+    n = (DEPTH - 4) // 6
+    stages = [16, 16 * WIDTH_MULT, 32 * WIDTH_MULT, 64 * WIDTH_MULT]
+    inputs = keras.Input(shape=(32, 32, 3))
 
-    # stem
-    x = layers.Conv2D(16, 3, padding="same", use_bias=False)(inputs)
+    x = layers.Rescaling(1.0 / 255)(inputs)
 
-    # WRN-28 = (4,4,4) blocks
-    # widen_factor=10 => 160/320/640 channels
-    x = make_block_group(x, 160, num_blocks=4, stride=1, drop_rate=drop_rate)
-    x = make_block_group(x, 320, num_blocks=4, stride=2, drop_rate=drop_rate)
-    x = make_block_group(x, 640, num_blocks=4, stride=2, drop_rate=drop_rate)
+    x = layers.Conv2D(
+        stages[0],
+        (3, 3),
+        padding="same",
+        use_bias=False,
+        kernel_initializer=INIT,
+        kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+    )(x)
+
+    for i in range(1, 4):
+        x = wide_basic(x, stages[i - 1], stages[i], stride=(1 if i == 1 else 2))
+        for _ in range(n - 1):
+            x = wide_basic(x, stages[i], stages[i], stride=1)
 
     x = layers.BatchNormalization()(x)
     x = layers.Activation("relu")(x)
-
     x = layers.GlobalAveragePooling2D()(x)
-    outputs = layers.Dense(num_classes)(x)
 
-    return keras.Model(inputs, outputs, name="WRN_28_10")
+    outputs = layers.Dense(
+        10,
+        kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
+    )(x)
+
+    return keras.Model(inputs, outputs)

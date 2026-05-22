@@ -96,18 +96,15 @@ def load_preact_resnet_18(steps_per_epoch):
     return model
 
 def load_wide_resnet(steps_per_epoch):
-    model = wide_resnet_28.WideResNet28_10(
-        input_shape=(32, 32, 3),
-        num_classes=10,
-    )
+    model = wide_resnet_28.get_network()
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
         values=[0.1, 0.01, 0.001]
     )
     optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.0, nesterov=False)
-    model.compile(loss=loss, optimizer=optimizer, jit_compile=True)
-    optimizer.build(model.trainable_variables)
+    model.compile(loss=loss, optimizer=optimizer)
+    # optimizer.build(model.trainable_variables)
     model.name = "wide_resnet_28_10"
     return model
 
