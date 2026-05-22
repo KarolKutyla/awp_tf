@@ -54,7 +54,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
         shape = x_batch.shape
         invariant_shape = tf.TensorShape([None] + shape[1:])
-        _, x_adv = tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, back_prop=False, shape_invariants=[i0.shape, invariant_shape])
+        _, x_adv = tf.nest.map_structure(tf.stop_gradient, tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, shape_invariants=[i0.shape, invariant_shape]))
         return x_adv
 
 
