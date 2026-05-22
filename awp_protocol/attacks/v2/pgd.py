@@ -53,6 +53,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
         def cond(i, x):
             return i < self._pgd_step
+
         def body(i, x):
             x = self._pgd_l2_iteration(x_batch, x_adv, y_batch)
             return i + 1, x
