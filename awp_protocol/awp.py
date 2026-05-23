@@ -255,9 +255,14 @@ class AdversarialTrainerAWPTensorflow:
         else:
             return self._trainer.awp_train_step(x_batch, y_batch)
 
-
-    def _non_adversarial_step(self) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        ...
+    @tf.function
+    def _non_adversarial_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        with tf.GradientTape() as tape:
+            logits = self._classifier(x_batch)
+            loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)(y_batch, logits)
+        gradient = tape.gradient(loss, self._classifier.trainable_variables)
+        self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
+        return loss, logits, tf.constant(0.0), tf.constant(0.0)
 
 
     def _init_training_object(self):
