@@ -46,22 +46,16 @@ class BatchProcessor:
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
         step_size = self._params.step_size or self._params.calc_step_size()
-        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=step_size)
+        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, awp_steps=self._params.awp_steps, step_size=step_size)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params)
         self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
-        self._awp_steps = tf.constant(self._params.awp_steps, dtype=tf.int32)
-
 
 
     @tf.function(jit_compile=True)
     def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         self._weight_calculator.reset_weight_perturbations()
         x_adv = self._calc_weight_perturbation(x_batch, y_batch)
-        with tf.GradientTape() as tape:
-            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
-            robust_loss = self._robust_loss.calculate(ctx)
-        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._classifier.optimizer.apply(gradient)
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
         self._weight_calculator.subtract_weight_perturbations()
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
@@ -71,11 +65,7 @@ class BatchProcessor:
     @tf.function(jit_compile=True)
     def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
-        with tf.GradientTape() as tape:
-            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
-            robust_loss = self._robust_loss.calculate(ctx)
-        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._classifier.optimizer.apply(gradient)
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
@@ -90,6 +80,15 @@ class BatchProcessor:
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
 
 
+    def _update_model_adversarial(self, x_batch, y_batch, x_adv):
+        with tf.GradientTape() as tape:
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
+            robust_loss = self._robust_loss.calculate(ctx)
+        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
+        self._classifier.optimizer.apply(gradient)
+        return robust_loss, ctx
+
+
     def _calc_weight_perturbation(self, x_batch, y_batch) -> tf.Tensor:
         x_adv = x_batch
         i0 = tf.constant(0, dtype=tf.int32)
@@ -100,7 +99,7 @@ class BatchProcessor:
 
         def body(i, x):
             x = self._attack.generate(x_batch, y_batch)
-            self._awp_iterations(x_batch, y_batch, x)
+            self._weight_calculator.calculate_weight_perturbation(x, y_batch)
             return i + 1, x
 
         _, x_adv = tf.nest.map_structure(
@@ -110,30 +109,26 @@ class BatchProcessor:
         return x_adv
 
 
-    def _awp_iterations(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> None:
-        i0 = tf.constant(0, dtype=tf.int32)
-
-        def cond(i):
-            return i < self._awp_steps
-
-        def body(i):
-            with tf.GradientTape() as tape:
-                # ctx = self._calc_awp_loss_context(x_batch, y_batch, x_pert)
-                logits = self._classifier(x_pert, training=False)
-                loss = self._clean_loss(y_batch, logits)
-            gradient = tape.gradient(loss, self._classifier.trainable_variables)
-            self._weight_calculator.calculate_weight_perturbations(gradient)
-            self._weight_calculator.apply_weight_perturbations()
-            return i + 1
-
-        _, = tf.nest.map_structure(
-            tf.stop_gradient,
-            tf.while_loop(cond, body, [i0], parallel_iterations=1)
-        )
-
-
-    def _calc_awp_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        return self._calc_loss_context(x_batch, y_batch, x_pert, False)
+    # def _awp_iterations(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> None:
+    #     i0 = tf.constant(0, dtype=tf.int32)
+    #
+    #     def cond(i):
+    #         return i < self._awp_steps
+    #
+    #     def body(i):
+    #         with tf.GradientTape() as tape:
+    #             # ctx = self._calc_awp_loss_context(x_batch, y_batch, x_pert)
+    #             logits = self._classifier(x_pert, training=False)
+    #             loss = self._clean_loss(y_batch, logits)
+    #         gradient = tape.gradient(loss, self._classifier.trainable_variables)
+    #         self._weight_calculator.calculate_weight_perturbations(gradient)
+    #         self._weight_calculator.apply_weight_perturbations()
+    #         return i + 1
+    #
+    #     _, = tf.nest.map_structure(
+    #         tf.stop_gradient,
+    #         tf.while_loop(cond, body, [i0], parallel_iterations=1)
+    #     )
 
 
     def _calc_training_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
