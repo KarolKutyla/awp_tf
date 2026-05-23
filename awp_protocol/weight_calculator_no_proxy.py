@@ -61,7 +61,7 @@ class WeightCalculator:
     def calculate_weight_perturbation(self, y_batch: tf.Tensor, x_pert: tf.Tensor) -> None:
         i0 = tf.constant(0, dtype=tf.int32)
 
-        def cond(i):
+        def cond(i, x_pert, y_batch):
             return i < self._awp_steps
 
         _, _, _ = tf.nest.map_structure(

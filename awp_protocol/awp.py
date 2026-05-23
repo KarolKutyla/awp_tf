@@ -149,6 +149,7 @@ class AdversarialTrainerAWPTensorflow:
             validation_dataset=None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
             steps_per_epoch: int = None,
+            enable_adversarial = True
     ):
         callbacks = callbacks or []
         self._logger = ProgbarLogger()
@@ -159,12 +160,12 @@ class AdversarialTrainerAWPTensorflow:
         self._trainer = self._init_training_object()
 
         for epoch in range(nb_epochs):
-            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset)
+            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
         self._callback_list.on_train_end()
 
 
-    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None):
+    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, enable_adversarial = True):
         self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
@@ -178,7 +179,7 @@ class AdversarialTrainerAWPTensorflow:
         start_time = time.time()
         warmup = epoch <= self._warmup
         for step, (x_batch, y_batch) in enumerate(train_dataset):
-            self._run_batch(x_batch, y_batch, step+1, warmup=warmup)
+            self._run_batch(x_batch, y_batch, step+1, warmup=warmup, enable_adversarial=enable_adversarial)
         end_time = time.time()
         train_time = end_time - start_time
 
@@ -209,10 +210,10 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list.on_epoch_end(epoch, logs)
 
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup):
+    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup, enable_adversarial=True):
         self._callback_list.on_batch_begin(step)
 
-        batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
+        batch_results = self._train_step(x_batch, y_batch, warmup=warmup, enable_adversarial=enable_adversarial)
         self._update_metrics(y_batch, batch_results)
         self._callback_list.on_batch_end(step, self._collect_train_logs())
 
@@ -246,11 +247,17 @@ class AdversarialTrainerAWPTensorflow:
         self._robust_accuracy_metric.reset_state()
 
 
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        if not enable_adversarial:
+            return self._non_adversarial_step()
         if warmup:
             return self._trainer.adv_train_step(x_batch, y_batch)
         else:
             return self._trainer.awp_train_step(x_batch, y_batch)
+
+
+    def _non_adversarial_step(self) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        ...
 
 
     def _init_training_object(self):
