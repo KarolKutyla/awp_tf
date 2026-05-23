@@ -264,7 +264,7 @@ class AdversarialTrainerAWPTensorflow:
             loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)(y_batch, logits)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
-        return loss, logits, tf.constant(0.0), tf.constant(0.0)
+        return loss, logits, loss, logits
 
 
     def _init_training_object(self):
