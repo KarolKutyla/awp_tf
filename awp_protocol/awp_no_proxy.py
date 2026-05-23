@@ -109,7 +109,8 @@ class AdversarialTrainerAWPTensorflow:
             batch_size: int = 128,
             nb_epochs: int = 1,
             callbacks: list[Callback] | None = None,
-            **kwargs,
+            enable_adversarial = True,
+            **kwargs
     ):
         train_dataset = (
             tf.data.Dataset.from_tensor_slices((x, y))
@@ -126,7 +127,7 @@ class AdversarialTrainerAWPTensorflow:
                 .prefetch(tf.data.AUTOTUNE)
             )
 
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
 
     def fit_dataset(
@@ -134,10 +135,12 @@ class AdversarialTrainerAWPTensorflow:
             train_dataset: tf.data.Dataset,
             validation_dataset: tf.data.Dataset | None = None,
             nb_epochs: int = 1,
-            callbacks: list[tf.keras.callbacks.Callback] | None = None
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            enable_adversarial = True,
+            **kwargs
     ):
         self._steps_per_epoch = train_dataset.cardinality().numpy() or None
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
 
     def _train_loop(
@@ -147,6 +150,7 @@ class AdversarialTrainerAWPTensorflow:
             validation_dataset=None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
             steps_per_epoch: int = None,
+            enable_adversarial=True
     ):
         callbacks = callbacks or []
         self._logger = ProgbarLogger()
@@ -157,12 +161,12 @@ class AdversarialTrainerAWPTensorflow:
         self._trainer = self._init_training_object()
 
         for epoch in range(nb_epochs):
-            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset)
+            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
         self._callback_list.on_train_end()
 
 
-    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None):
+    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, enable_adversarial=True):
         self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
@@ -176,7 +180,7 @@ class AdversarialTrainerAWPTensorflow:
         start_time = time.time()
         warmup = epoch <= self._warmup
         for step, (x_batch, y_batch) in enumerate(train_dataset):
-            self._run_batch(x_batch, y_batch, step+1, warmup=warmup)
+            self._run_batch(x_batch, y_batch, step+1, warmup=warmup, enable_adversarial=enable_adversarial)
         end_time = time.time()
         train_time = end_time - start_time
 
@@ -207,10 +211,10 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list.on_epoch_end(epoch, logs)
 
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup):
+    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup, enable_adversarial=True):
         self._callback_list.on_batch_begin(step)
 
-        batch_results = self._train_step(x_batch, y_batch, warmup=warmup)
+        batch_results = self._train_step(x_batch, y_batch, warmup=warmup, enable_adversarial=enable_adversarial)
         self._update_metrics(y_batch, batch_results)
         self._callback_list.on_batch_end(step, self._collect_train_logs())
 
@@ -244,11 +248,23 @@ class AdversarialTrainerAWPTensorflow:
         self._robust_accuracy_metric.reset_state()
 
 
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        if not enable_adversarial:
+            return self._non_adversarial_step()
         if warmup:
             return self._trainer.adv_train_step(x_batch, y_batch)
         else:
             return self._trainer.awp_train_step(x_batch, y_batch)
+
+
+    @tf.function
+    def _non_adversarial_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        with tf.GradientTape() as tape:
+            logits = self._classifier(x_batch)
+            loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)(y_batch, logits)
+        gradient = tape.gradient(loss, self._classifier.trainable_variables)
+        self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
+        return loss, logits, tf.constant(0.0), tf.constant(0.0)
 
 
     def _init_training_object(self):
