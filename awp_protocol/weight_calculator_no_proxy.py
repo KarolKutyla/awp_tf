@@ -67,15 +67,13 @@ class WeightCalculator:
 
 
     def _calculate_initial_perturbation(self, weight_gradient: tf.Tensor, idx):
-        gradient_norm = tf.norm(weight_gradient)
-        normalized_gradient = tf.math.divide_no_nan(weight_gradient, gradient_norm)
-        weight_perturbation = self.step_size * normalized_gradient * self._weight_norms[idx]
+        step_direction = tf.math.divide_no_nan(weight_gradient, tf.norm(weight_gradient))
+        weight_perturbation = step_direction * self.step_size * self._weight_norms[idx]
         return weight_perturbation
 
 
     def _scale_perturbation_to_bound(self, weight_perturbation: tf.Tensor, idx) -> tf.Tensor:
-        perturbation_norm = tf.norm(weight_perturbation)
-        scale_factor = tf.math.divide_no_nan(self._weight_norms[idx], perturbation_norm) * self._weight_constraint
+        scale_factor = tf.math.divide_no_nan(self._weight_norms[idx], tf.norm(weight_perturbation)) * self._weight_constraint
         scale_factor = tf.minimum(tf.constant(1.0, dtype=scale_factor.dtype), scale_factor)
         return weight_perturbation * scale_factor
 

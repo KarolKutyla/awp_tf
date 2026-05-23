@@ -8,7 +8,8 @@ class TradesLoss(AdversarialLoss):
         super().__init__()
         if regularization_parameter < 0.0:
             raise Exception(f"Beta parameter must be greater than 0. Passed value is {regularization_parameter}")
-        self._regularization_parameter = regularization_parameter
+        self._regularization_parameter = tf.constant(regularization_parameter, dtype=tf.float32)
+        self._mean_factor = tf.constant(regularization_parameter + 1.0, dtype=tf.float32)
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     @tf.function
@@ -19,8 +20,8 @@ class TradesLoss(AdversarialLoss):
 
         loss_clean = self._sparse_categorical_cross_entropy(y, logits)
         loss_kl = _kld_loss(logits, logits_adv)
-        loss = loss_clean + self._regularization_parameter * loss_kl
-        return loss
+        loss = loss_clean + loss_kl * self._regularization_parameter
+        return loss / self._mean_factor
 
 def _kld_loss(logits, logits_adv):
     p = tf.nn.softmax(logits)
