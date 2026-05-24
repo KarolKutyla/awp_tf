@@ -167,4 +167,5 @@ def load_tensorflow_resnet_50_v2(steps_per_epoch):
 
     return keras_resnet
 
-# load_tensorflow_resnet_152_v2(5).summary()
+load_tensorflow_resnet_18_v2_for_normal_training(5).summary()
+load_tensorflow_resnet_152_v2(5).summary()
