@@ -4,7 +4,7 @@ from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
 
 class TradesLoss(AdversarialLoss):
-    def __init__(self, regularization_parameter: float = 3.0):
+    def __init__(self, regularization_parameter: float = 1.0):
         super().__init__()
         if regularization_parameter < 0.0:
             raise Exception(f"Beta parameter must be greater than 0. Passed value is {regularization_parameter}")
