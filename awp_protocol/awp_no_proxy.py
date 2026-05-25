@@ -260,7 +260,7 @@ class AdversarialTrainerAWPTensorflow:
     @tf.function
     def _non_adversarial_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         with tf.GradientTape() as tape:
-            logits = self._classifier(x_batch)
+            logits = self._classifier(x_batch, training=True)
             loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)(y_batch, logits)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
