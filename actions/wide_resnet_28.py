@@ -89,7 +89,6 @@ def get_network():
         padding="same",
         use_bias=False,
         kernel_initializer=INIT,
-        kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
     )(inputs)
 
     for i in range(1, 4):
@@ -106,4 +105,4 @@ def get_network():
         kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
     )(x)
 
-    return keras.Sequential(inputs, outputs)
+    return keras.Model(inputs, outputs)
