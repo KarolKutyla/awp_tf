@@ -174,6 +174,5 @@ def wideresnet(input_shape, n_classes):
     wrn = layers.AveragePooling2D(pool_size=(8, 8), strides=(1, 1), padding='valid')(wrn)
     wrn = layers.Flatten()(wrn)
     wrn = layers.Dense(n_classes, kernel_initializer=weight_init())(wrn)
-    wrn = layers.Activation('softmax')(wrn)
     model = tf.keras.Model(inputs=in_layer, outputs=wrn)
     return model
