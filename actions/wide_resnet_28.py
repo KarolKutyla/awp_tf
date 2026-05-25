@@ -3,11 +3,6 @@ from tensorflow.keras import layers
 
 RESIZE_TO = 32
 
-SOURCE_BATCH_SIZE = 64
-TARGET_BATCH_SIZE = 3 * SOURCE_BATCH_SIZE  # Reference: Section 3.2
-EPOCHS = 2
-
-LEARNING_RATE = 0.03
 
 WEIGHT_DECAY = 0.0005
 INIT = "he_normal"
@@ -86,7 +81,7 @@ def get_network():
     stages = [16, 16 * WIDTH_MULT, 32 * WIDTH_MULT, 64 * WIDTH_MULT]
     inputs = keras.Input(shape=(32, 32, 3))
 
-    x = layers.Rescaling(1.0 / 255)(inputs)
+    # x = layers.Rescaling(1.0 / 255)(inputs)
 
     x = layers.Conv2D(
         stages[0],
@@ -95,7 +90,7 @@ def get_network():
         use_bias=False,
         kernel_initializer=INIT,
         kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
-    )(x)
+    )(inputs)
 
     for i in range(1, 4):
         x = wide_basic(x, stages[i - 1], stages[i], stride=(1 if i == 1 else 2))
@@ -111,4 +106,4 @@ def get_network():
         kernel_regularizer=keras.regularizers.l2(WEIGHT_DECAY),
     )(x)
 
-    return keras.Model(inputs, outputs)
+    return keras.Sequential(inputs, outputs)
