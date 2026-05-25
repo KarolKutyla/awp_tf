@@ -94,7 +94,7 @@ def load_preact_resnet_18(steps_per_epoch):
     return model
 
 def _load_wide_resnet(steps_per_epoch):
-    model = wide_resnet_28.get_network()
+    model = wide_resnet_28.wideresnet((32, 32, 3), 10)
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
         boundaries=[100 * steps_per_epoch, 150 * steps_per_epoch],
