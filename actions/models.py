@@ -93,7 +93,7 @@ def load_preact_resnet_18(steps_per_epoch):
     optimizer.build(model.trainable_variables)
     return model
 
-def load_wide_resnet(steps_per_epoch):
+def _load_wide_resnet(steps_per_epoch):
     model = wide_resnet_28.get_network()
     loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
     schedule = tf.keras.optimizers.schedules.PiecewiseConstantDecay(
@@ -102,8 +102,19 @@ def load_wide_resnet(steps_per_epoch):
     )
     optimizer = tf.keras.optimizers.SGD(learning_rate=schedule, momentum=0.9, nesterov=False, weight_decay=5e-4)
     model.compile(loss=loss, optimizer=optimizer)
-    model.name = "wide_resnet_28_10"
     return model
+
+
+def load_wide_resnet_standard(steps_per_epoch):
+    classifier = _load_wide_resnet(steps_per_epoch)
+    classifier.name = "wide_resnet_standard_training"
+    return classifier
+
+
+def load_wide_resnet_awp(steps_per_epoch):
+    classifier = _load_wide_resnet(steps_per_epoch)
+    classifier.name = "wide_resnet_awp"
+    return classifier
 
 def _load_tensorflow_resnet_18_v2(steps_per_epoch):
     backbone = keras_cv.models.ResNet18V2Backbone(include_rescaling=False, input_shape=(32, 32, 3))
