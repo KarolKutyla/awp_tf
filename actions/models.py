@@ -111,10 +111,22 @@ def load_wide_resnet_standard(steps_per_epoch):
     return classifier
 
 
+def load_wide_resnet_adversarial(steps_per_epoch):
+    classifier = _load_wide_resnet(steps_per_epoch)
+    classifier.name = "wide_resnet_adversarial_training"
+    return classifier
+
+
 def load_wide_resnet_awp(steps_per_epoch):
     classifier = _load_wide_resnet(steps_per_epoch)
     classifier.name = "wide_resnet_awp"
     return classifier
+
+def load_wide_resnet_awp_alternate_step(steps_per_epoch):
+    classifier = _load_wide_resnet(steps_per_epoch)
+    classifier.name = "wide_resnet_awp_alternate"
+    return classifier
+
 
 def _load_tensorflow_resnet_18_v2(steps_per_epoch):
     backbone = keras_cv.models.ResNet18V2Backbone(include_rescaling=False, input_shape=(32, 32, 3))
