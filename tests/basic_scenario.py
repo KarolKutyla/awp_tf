@@ -33,7 +33,7 @@ protocol_params = batch_processor.AWPParams(alternate_iteration=1, awp_steps=1, 
 awp_params = awp.Params(mode="trades", protocol_params=protocol_params)
 
 params = awp.Params(protocol_params=protocol_params)
-trainer = awp.AdversarialTrainerAWPTensorflow(model, proxy_model, attack, warmup=0, params=params)
+trainer = awp.Trainer(model, proxy_model, attack, warmup=0, params=params)
 
 save_callback = checkpoint_callback.EpochCheckpoint(f"checkpoints/{proxy_model.name}")
 epoch_logger_callback = epoch_logger.EpochLogger(save_filepath=f"logs/{proxy_model.name}/logs.txt", attack_params=attack_params, training_params=awp_params)

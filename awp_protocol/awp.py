@@ -29,7 +29,6 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
 from awp_protocol import batch_processor
-from awp_protocol.attacks.v1 import pgd
 from awp_protocol.attacks.attack import TensorflowEvasionAttack
 from awp_protocol.callbacks.progbar_logger import ProgbarLogger
 from awp_protocol.callbacks.checkpoint_callback import EpochCheckpoint
@@ -44,7 +43,7 @@ class Params:
     mode: str = "trades"
     protocol_params: batch_processor.AWPParams = batch_processor.AWPParams()
 
-class AdversarialTrainerAWPTensorflow:
+class Trainer:
     """
     Class performing adversarial training following Adversarial Weight Perturbation (AWP) protocol.
 
@@ -54,7 +53,6 @@ class AdversarialTrainerAWPTensorflow:
     def __init__(
             self,
             classifier: tf.keras.Model,
-            proxy_classifier: tf.keras.Model,
             attack: TensorflowEvasionAttack,
             warmup: int = 0,
             adversarial_loss: AdversarialLoss | None = None,
@@ -80,7 +78,6 @@ class AdversarialTrainerAWPTensorflow:
         self._params = replace(self._params, **overrides)
 
         self._classifier: tf.keras.Model = classifier
-        self._proxy_classifier: tf.keras.Model = proxy_classifier
         self._attack: TensorflowEvasionAttack = attack
         self._warmup: int
         self._apply_wp: bool
@@ -111,7 +108,8 @@ class AdversarialTrainerAWPTensorflow:
             batch_size: int = 128,
             nb_epochs: int = 1,
             callbacks: list[Callback] | None = None,
-            **kwargs,
+            enable_adversarial = True,
+            **kwargs
     ):
         train_dataset = (
             tf.data.Dataset.from_tensor_slices((x, y))
@@ -128,7 +126,7 @@ class AdversarialTrainerAWPTensorflow:
                 .prefetch(tf.data.AUTOTUNE)
             )
 
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
 
     def fit_dataset(
@@ -136,10 +134,12 @@ class AdversarialTrainerAWPTensorflow:
             train_dataset: tf.data.Dataset,
             validation_dataset: tf.data.Dataset | None = None,
             nb_epochs: int = 1,
-            callbacks: list[tf.keras.callbacks.Callback] | None = None
+            callbacks: list[tf.keras.callbacks.Callback] | None = None,
+            enable_adversarial = True,
+            **kwargs
     ):
         self._steps_per_epoch = train_dataset.cardinality().numpy() or None
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
 
 
     def _train_loop(
@@ -149,7 +149,7 @@ class AdversarialTrainerAWPTensorflow:
             validation_dataset=None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
             steps_per_epoch: int = None,
-            enable_adversarial = True
+            enable_adversarial=True
     ):
         callbacks = callbacks or []
         self._logger = ProgbarLogger()
@@ -165,7 +165,7 @@ class AdversarialTrainerAWPTensorflow:
         self._callback_list.on_train_end()
 
 
-    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, enable_adversarial = True):
+    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, enable_adversarial=True):
         self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
@@ -247,43 +247,37 @@ class AdversarialTrainerAWPTensorflow:
         self._robust_accuracy_metric.reset_state()
 
 
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         if not enable_adversarial:
-            return self._non_adversarial_step()
+            return self._non_adversarial_step(x_batch, y_batch)
         if warmup:
             return self._trainer.adv_train_step(x_batch, y_batch)
         else:
             return self._trainer.awp_train_step(x_batch, y_batch)
 
+
     @tf.function
-    def _non_adversarial_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _non_adversarial_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         with tf.GradientTape() as tape:
-            logits = self._classifier(x_batch)
+            logits = self._classifier(x_batch, training=True)
             loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)(y_batch, logits)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
-        return loss, logits, tf.constant(0.0), tf.constant(0.0)
+        return loss, logits, loss, logits
 
 
     def _init_training_object(self):
-        attack = self._attack or pgd.PGDAttack(self._proxy_classifier)
+        attack = self._attack
         adversarial_loss = self._adversarial_loss or _select_adversarial_loss(self._params.mode)
-        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._proxy_classifier)
+        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._classifier)
 
         return batch_processor.BatchProcessor(
             self._classifier,
-            self._proxy_classifier,
             attack,
             adversarial_loss,
             tracked_layers=tracked_layers,
             params=self._params.protocol_params
         )
-
-
-def clone_classifier(originator: tf.keras.Model) -> tf.keras.Model:
-    proxy_classifier = tf.keras.models.clone_model(originator)
-    proxy_classifier.set_weights(originator.get_weights())
-    return proxy_classifier
 
 
 def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, ...]:

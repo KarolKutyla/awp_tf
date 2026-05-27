@@ -10,12 +10,13 @@ from awp_protocol.losses.loss import AdversarialLoss
 from awp_protocol.losses.loss_context import LossContext
 
 
+
 @dataclass(frozen=True)
 class AWPParams:
     alternate_iteration: int = 1
     awp_steps: int = 10
     weight_constraint: float = 5.0e-3
-    step_size: float = weight_constraint / (awp_steps * alternate_iteration)
+    step_size: float | None = None
 
     def calc_step_size(self):
         return self.weight_constraint / (self.awp_steps * self.alternate_iteration)
@@ -27,7 +28,6 @@ class BatchProcessor:
     def __init__(
             self,
             classifier: keras.Model,
-            proxy_classifier: keras.Model,
             attack: TensorflowEvasionAttack,
             adversarial_loss: AdversarialLoss,
             tracked_layers: tuple[bool, ...],
@@ -37,37 +37,24 @@ class BatchProcessor:
         self._dtype : tf.dtypes.DType = classifier.weights[0].dtype
         self._params = params or AWPParams()
         self._params = replace(self._params, **overrides)
-        self._params = replace(self._params, step_size=self._params.calc_step_size())
 
         self._classifier: tf.keras.Model = classifier
         _validate_optimizer(self._classifier)
-        self._proxy_classifier: keras.Model = proxy_classifier
         self._attack: TensorflowEvasionAttack = attack
         self._robust_loss: AdversarialLoss = adversarial_loss
-
-        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, step_size=self._params.step_size)
-        self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, self._proxy_classifier, tracked_layers, weight_calculator_params)
-
-        self._alternate_iteration: int = self._params.alternate_iteration
-        self._awp_steps: int = self._params.awp_steps
-
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
+
+        step_size = self._params.step_size or self._params.calc_step_size()
+        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint, awp_steps=self._params.awp_steps, step_size=step_size)
+        self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params)
+        self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
 
 
     @tf.function(jit_compile=True)
     def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        self._weight_calculator.batch_process_begin()
-        x_adv = x_batch
-        for a in range(self._alternate_iteration):
-            x_adv = self._attack.generate(x_batch, y_batch)
-            self._find_weight_perturbation(x_batch, y_batch, x_adv)
-
-        self._weight_calculator.add_weight_perturbations()
-        with tf.GradientTape() as tape:
-            ctx = self._training_forward_pass(x_batch, y_batch, x_adv)
-            robust_loss = self._robust_loss.calculate(ctx)
-        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._update_classifier(gradient)
+        self._weight_calculator.reset_weight_perturbations()
+        x_adv = self._calc_weight_perturbation(x_batch, y_batch)
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
         self._weight_calculator.subtract_weight_perturbations()
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
@@ -77,11 +64,7 @@ class BatchProcessor:
     @tf.function(jit_compile=True)
     def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
-        with tf.GradientTape() as tape:
-            ctx = self._training_forward_pass(x_batch, y_batch, x_adv)
-            robust_loss = self._robust_loss.calculate(ctx)
-        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
-        self._update_classifier(gradient)
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
 
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
@@ -90,28 +73,52 @@ class BatchProcessor:
     @tf.function(jit_compile=True)
     def validation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
-        ctx = self._validation_forward_pass(x_batch, y_batch, x_adv)
+        ctx = self._calc_validation_loss_context(x_batch, y_batch, x_adv)
         clean_loss = self._clean_loss(y_batch, ctx.logits_clean)
         robust_loss = self._robust_loss.calculate(ctx)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
 
 
-    def _find_weight_perturbation(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
-        for j in range(self._awp_steps):
-            self._weight_perturbation_step(x_batch, y_batch, x_pert)
-
-
-    def _weight_perturbation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor):
+    def _update_model_adversarial(self, x_batch, y_batch, x_adv):
         with tf.GradientTape() as tape:
-            result = self._proxy_forward_pass(x_batch, y_batch, x_pert)
-            loss = self._robust_loss.calculate(result)
-        gradient = tape.gradient(loss, self._proxy_classifier.trainable_variables)
-        self._weight_calculator.calculate_and_update_weight_perturbation(gradient)
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_adv)
+            robust_loss = self._robust_loss.calculate(ctx)
+        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
+        self._classifier.optimizer.apply(gradient)
+        return robust_loss, ctx
 
 
-    def _training_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._classifier(x_batch, training=True)
-        logits_adv = self._classifier(x_pert, training=True)
+    def _calc_weight_perturbation(self, x_batch, y_batch) -> tf.Tensor:
+        x_adv = x_batch
+        i0 = tf.constant(0, dtype=tf.int32)
+        invariant_shape = tf.TensorShape([None] + x_batch.shape[1:])
+
+        def cond(i, x):
+            return i < self._alternate_iteration
+
+        def body(i, x):
+            x = self._attack.generate(x_batch, y_batch)
+            self._weight_calculator.calculate_weight_perturbation(x, y_batch)
+            return i + 1, x
+
+        _, x_adv = tf.nest.map_structure(
+            tf.stop_gradient,
+            tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, shape_invariants=[i0.get_shape(), invariant_shape])
+        )
+        return x_adv
+
+
+    def _calc_training_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+        return self._calc_loss_context(x_batch, y_batch, x_pert, True)
+
+
+    def _calc_validation_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
+        return self._calc_loss_context(x_batch, y_batch, x_pert, False)
+
+
+    def _calc_loss_context(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor, training: bool):
+        logits = self._classifier(x_batch, training=training)
+        logits_adv = self._classifier(x_pert, training=training)
         ctx = LossContext(
             x_batch=x_batch,
             x_adv=x_pert,
@@ -120,38 +127,6 @@ class BatchProcessor:
             logits_adv=logits_adv
         )
         return ctx
-
-
-    def _validation_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._classifier(x_batch, training=False)
-        logits_adv = self._classifier(x_pert, training=False)
-        ctx = LossContext(
-            x_batch=x_batch,
-            x_adv=x_pert,
-            y_batch=y_batch,
-            logits_clean=logits,
-            logits_adv=logits_adv
-        )
-        return ctx
-
-
-    def _proxy_forward_pass(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_pert: tf.Tensor) -> LossContext:
-        logits = self._proxy_classifier(x_batch, training=True)
-        logits_adv = self._proxy_classifier(x_pert, training=True)
-        ctx = LossContext(
-            x_batch=x_batch,
-            x_adv=x_pert,
-            y_batch=y_batch,
-            logits_clean=logits,
-            logits_adv=logits_adv
-        )
-        return ctx
-
-
-    def _update_classifier(self, gradients: list[tf.Tensor]):
-        if self._classifier.optimizer:
-            self._classifier.optimizer.apply(gradients)
-
 
 
 def _validate_optimizer(classifier: keras.models.Model):

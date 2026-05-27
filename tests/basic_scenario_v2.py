@@ -3,8 +3,8 @@ import tensorflow as tf
 from actions import models, datasets_v2, attacks
 
 from awp_protocol.attacks.v2 import pgd
-from awp_protocol import awp_no_proxy as awp
-from awp_protocol import batch_processor_no_proxy as batch_processor
+from awp_protocol import awp as awp
+from awp_protocol import batch_processor as batch_processor
 from awp_protocol.callbacks import checkpoint_callback, epoch_logger
 
 tf.config.run_functions_eagerly(False)
@@ -28,7 +28,7 @@ protocol_params = batch_processor.AWPParams(alternate_iteration=1, awp_steps=1, 
 awp_params = awp.Params(mode="trades", protocol_params=protocol_params)
 
 params = awp.Params(protocol_params=protocol_params)
-trainer = awp.AdversarialTrainerAWPTensorflow(model, pgd_attack, warmup=0, params=params)
+trainer = awp.Trainer(model, pgd_attack, warmup=0, params=params)
 
 save_callback = checkpoint_callback.EpochCheckpoint(f"checkpoints/{model.name}")
 epoch_logger_callback = epoch_logger.EpochLogger(save_filepath=f"logs/{model.name}/logs.txt", attack_params=attack_params, training_params=awp_params)
