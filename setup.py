@@ -6,9 +6,5 @@ setup(
     packages=find_packages(),
     install_requires=[
         "tensorflow",
-        "keras-hub",
-        "keras-cv",
-        "tensorflow-datasets",
-        "importlib-resources"
     ],
 )
