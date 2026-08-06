@@ -108,13 +108,6 @@ class WeightCalculator:
                 tf.norm(weight_perturbation)
             )
         )
-
-        scale_factor = (
-            tf.math.divide_no_nan(
-                allowed_norm,
-                tf.norm(weight_perturbation)
-            )
-        )
         scale_factor = tf.minimum(tf.constant(1.0, dtype=scale_factor.dtype), scale_factor)
         return weight_perturbation * scale_factor
 
