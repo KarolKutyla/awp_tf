@@ -51,7 +51,7 @@ class BatchProcessor:
         self._alternate_iteration = tf.constant(self._params.alternate_iteration, dtype=tf.int32)
 
 
-    @tf.function(jit_compile=True)
+    @tf.function
     def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         self._weight_calculator.reset_weight_perturbations()
         loss_context = self._calc_non_training_loss_context(x_batch, y_batch, x_batch)
