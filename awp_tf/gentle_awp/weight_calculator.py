@@ -16,7 +16,7 @@ class WeightCalculator:
             classifier: tf.keras.Model,
             layers_selected_for_weight_perturbation: tuple[bool, ...] | None,
             params: WeightParams | None = None,
-            loss: loss.AdversarialLoss = adversarial_categorical_cross_entropy.AdversarialLoss()
+            loss: loss.AdversarialLoss = adversarial_categorical_cross_entropy.AdversarialSparseCategoricalCrossEntropy()
             **overrides
     ):
         self.step_size: tf.Tensor
