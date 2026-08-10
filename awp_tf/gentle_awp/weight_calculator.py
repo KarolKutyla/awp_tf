@@ -66,7 +66,7 @@ class WeightCalculator:
         def cond(i, ctx):
             return i < self._awp_steps
 
-        _, _, _ = tf.nest.map_structure(
+        _, _ = tf.nest.map_structure(
             tf.stop_gradient,
             tf.while_loop(cond, self._calculate_weight_perturbation_body, [i0, ctx], parallel_iterations=1))
 
