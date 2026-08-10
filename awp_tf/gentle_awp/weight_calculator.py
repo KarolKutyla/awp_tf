@@ -1,5 +1,8 @@
 from dataclasses import dataclass, replace
 
+from awp_tf.losses.loss_context import LossContext
+from awp_tf.losses import loss, trades_loss, adversarial_categorical_cross_entropy, loss_context
+
 import tensorflow as tf
 
 @dataclass(frozen=True)
@@ -13,6 +16,7 @@ class WeightCalculator:
             classifier: tf.keras.Model,
             layers_selected_for_weight_perturbation: tuple[bool, ...] | None,
             params: WeightParams | None = None,
+            loss: loss.AdversarialLoss = adversarial_categorical_cross_entropy.AdversarialLoss()
             **overrides
     ):
         self.step_size: tf.Tensor
@@ -20,7 +24,7 @@ class WeightCalculator:
         self._dtype = classifier.weights[0].dtype
         self._classifier = classifier
         self._perturbed_layers: tuple[bool, ...] = layers_selected_for_weight_perturbation or select_default_trained_layers_tf(self._classifier)
-        self._clean_loss = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
+        self._loss = loss
 
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
@@ -56,21 +60,21 @@ class WeightCalculator:
             self._classifier.trainable_variables[idx].assign_sub(self._weight_perturbations[idx])
 
 
-    def calculate_weight_perturbation(self, x_pert: tf.Tensor, y_batch: tf.Tensor) -> None:
+    def calculate_weight_perturbation(self, ctx: LossContext) -> None:
         i0 = tf.constant(0, dtype=tf.int32)
 
-        def cond(i, x_adv, y):
+        def cond(i, ctx):
             return i < self._awp_steps
 
         _, _, _ = tf.nest.map_structure(
             tf.stop_gradient,
-            tf.while_loop(cond, self._calculate_weight_perturbation_body, [i0, x_pert, y_batch], parallel_iterations=1))
+            tf.while_loop(cond, self._calculate_weight_perturbation_body, [i0, ctx], parallel_iterations=1))
 
 
-    def _calculate_weight_perturbation_body(self, i, x_adv, y):
+    def _calculate_weight_perturbation_body(self, i, ctx: LossContext):
         with tf.GradientTape() as tape:
-            logits = self._classifier(x_adv, training=False)
-            loss = self._clean_loss(y, logits)
+            ctx = ctx._replace(logits_clean=self._classifier(ctx.x_batch), logits_adv=self._classifier(ctx.x_adv))
+            loss = self._loss.calculate(ctx)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
 
         for idx in self._indices_of_selected_layers:
@@ -79,7 +83,7 @@ class WeightCalculator:
                     self._calculate_perturbation_for_single_trainable_variable(gradient[idx], idx))
 
         self.apply_weight_perturbations()
-        return i + 1, x_adv, y
+        return i + 1, x, y
 
 
     def _calculate_perturbation_for_single_trainable_variable(self, weight_gradient: tf.Tensor, idx) -> tf.Tensor:
