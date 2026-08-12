@@ -64,10 +64,11 @@ class WeightCalculator:
     def calculate_weight_perturbation(self, x, y, x_adv, x_alt, y_alt, x_alt_adv) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_alt_adv)
-        for gradients, gradients_alt, perturbation, norm in zip(gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
-            standard_step_direction = tf.math.divide_no_nan(gradients, tf.norm(gradients))
-            alt_step_direction = tf.math.divide_no_nan(gradients, tf.norm(gradients_alt))
-            mixed_direction = standard_step_direction + alt_step_direction
+        for gradient, gradient_alt, perturbation, norm in zip(gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
+            standard_step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
+            alt_step_direction = tf.math.divide_no_nan(gradient_alt, tf.norm(gradient_alt))
+            mixed_gradient = standard_step_direction + alt_step_direction
+            mixed_direction = tf.math.divide_no_nan(mixed_gradient, tf.norm(mixed_gradient))
             mixed_step = mixed_direction * norm * self.step_size
             perturbation.assign(mixed_step)
 
