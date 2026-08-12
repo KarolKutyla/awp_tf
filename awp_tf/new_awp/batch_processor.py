@@ -66,7 +66,7 @@ class BatchProcessor:
 
 
     @tf.function(jit_compile=True)
-    def awp_train_step_subset(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def awp_train_step_subset(self, x_batch, y_batch, x_batch_awp, y_batch_awp) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_batch_adv = self._attack.generate(x_batch, y_batch)
         logits_clean = self._classifier(x_batch, training=False)
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
@@ -74,13 +74,12 @@ class BatchProcessor:
         adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
 
         self._weight_calculator.initiate_state_for_batch_process()
-        batch_size = x_batch.shape[0]
-        held_out_size = batch_size // 5
-        if held_out_size > 0:
-            self._weight_calculator.calculate_weight_perturbation(x_batch[held_out_size:], y_batch[held_out_size:], x_batch_adv[held_out_size:])
-            self._weight_calculator.append_weight_perturbations()
-            _, _ = self._update_model_adversarial(x_batch[:-held_out_size], y_batch[:-held_out_size], x_batch_adv[:-held_out_size])
-            self._weight_calculator.subtract_weight_perturbations()
+        x_batch_adv_awp = self._attack.generate(x_batch_awp, y_batch_awp)
+        self._weight_calculator.calculate_weight_perturbation(x_batch_awp, y_batch_awp, x_batch_adv_awp)
+        self._weight_calculator.append_weight_perturbations()
+
+        _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
+        self._weight_calculator.subtract_weight_perturbations()
 
         return clean_loss, logits_clean, adv_loss, logits_adv
 
