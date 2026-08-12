@@ -75,10 +75,10 @@ class BatchProcessor:
         _, _ = self._update_model_adversarial(x_batch[:batch_slice], y_batch[:batch_slice], x_batch_adv[:batch_slice])
         self._weight_calculator.subtract_weight_perturbations()
 
-        logits_clean = self._classifier(x_batch, training=False)
-        clean_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_clean[:batch_slice])
-        logits_adv = self._classifier(x_batch_adv, training=False)
-        adv_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_adv[:batch_slice])
+        logits_clean = self._classifier(x_batch[:batch_slice], training=False)
+        clean_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv[:batch_slice], training=False)
+        adv_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_adv)
         return clean_loss, logits_clean, adv_loss, logits_adv
 
 
