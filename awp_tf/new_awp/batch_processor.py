@@ -55,7 +55,7 @@ class BatchProcessor:
         self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.append_weight_perturbations()
 
-        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, last_calculated_adv)
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.subtract_weight_perturbations()
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
