@@ -54,11 +54,14 @@ class BatchProcessor:
         x_batch_adv = self._attack.generate(x_batch, y_batch)
         self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.append_weight_perturbations()
-
-        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
+        _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.subtract_weight_perturbations()
-        clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
-        return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
+
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
+        return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     @tf.function(jit_compile=True)
@@ -69,11 +72,14 @@ class BatchProcessor:
         batch_slice = int(batch_size*(3/4))
         self._weight_calculator.calculate_weight_perturbation(x_batch[batch_slice:], y_batch[batch_slice:], x_batch_adv[batch_slice:])
         self._weight_calculator.append_weight_perturbations()
-
-        robust_loss, ctx = self._update_model_adversarial(x_batch[:batch_slice], y_batch[:batch_slice], x_batch_adv[:batch_slice])
+        _, _ = self._update_model_adversarial(x_batch[:batch_slice], y_batch[:batch_slice], x_batch_adv[:batch_slice])
         self._weight_calculator.subtract_weight_perturbations()
-        clean_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=ctx.logits_clean[:batch_slice])
-        return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
+
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_clean[:batch_slice])
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=logits_adv[:batch_slice])
+        return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     @tf.function(jit_compile=True)
