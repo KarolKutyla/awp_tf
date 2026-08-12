@@ -12,7 +12,7 @@ class TradesLoss(AdversarialLoss):
         self._mean_factor = tf.constant(regularization_parameter + 1.0, dtype=tf.float32)
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
-    @tf.function
+    # @tf.function
     def calculate(self, loss_context: LossContext) -> tf.Tensor:
         y = loss_context.y_batch
         logits = loss_context.logits_clean

@@ -66,12 +66,13 @@ class BatchProcessor:
         self._weight_calculator.initiate_state_for_batch_process()
         x_batch_adv = self._attack.generate(x_batch, y_batch)
         batch_size = x_batch.shape[0]
-        self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
+        batch_slice = int(batch_size*(3/4))
+        self._weight_calculator.calculate_weight_perturbation(x_batch[batch_slice:], y_batch[batch_slice:], x_batch_adv[batch_slice:])
         self._weight_calculator.append_weight_perturbations()
 
-        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
+        robust_loss, ctx = self._update_model_adversarial(x_batch[:batch_slice], y_batch[:batch_slice], x_batch_adv[:batch_slice])
         self._weight_calculator.subtract_weight_perturbations()
-        clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
+        clean_loss = self._clean_loss(y_true=y_batch[:batch_slice], y_pred=ctx.logits_clean[:batch_slice])
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
 
 
