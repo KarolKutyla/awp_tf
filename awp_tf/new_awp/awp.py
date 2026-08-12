@@ -30,6 +30,7 @@ class Trainer:
             adversarial_loss: AdversarialLoss | None = None,
             trained_layers: tuple[bool, ...] | None = None,
             params: Params | None = None,
+            subset_enabled = False,
             **overrides
     ):
         self._fast_mode = True
@@ -58,6 +59,7 @@ class Trainer:
         self._clean_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
         self._robust_loss_metric = tf.keras.metrics.Mean()
         self._robust_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
+        self._subset_enabled = subset_enabled
 
 
     def fit(
@@ -108,7 +110,7 @@ class Trainer:
             nb_epochs,
             validation_dataset=None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            enable_adversarial=True
+            enable_adversarial=True,
     ):
         callbacks = callbacks or []
         self._logger = ProgbarLogger()
@@ -207,6 +209,8 @@ class Trainer:
 
 
     def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        if self._subset_enabled:
+            return self._trainer.awp_train_step_subset(x_batch, y_batch)
         if not enable_adversarial:
             return self._non_adversarial_step(x_batch, y_batch)
         if warmup:
