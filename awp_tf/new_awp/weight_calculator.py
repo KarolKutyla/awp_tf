@@ -63,8 +63,8 @@ class WeightCalculator:
 
     def calculate_weight_perturbation(self, x, y, x_adv) -> None:
         gradient = self._calculate_gradient(x, y, x_adv)
-        for idx, perturbation, norm in zip(self._indices_of_selected_layers, self._weight_perturbations, self._weight_norms):
-            perturbation.assign(self._calculate_perturbation_for_single_layer(gradient[idx], norm.value()))
+        for gradient, perturbation, norm in zip(gradient, self._weight_perturbations, self._weight_norms):
+            perturbation.assign(self._calculate_perturbation_for_single_layer(gradient, norm.value()))
 
 
     def _calculate_gradient(self, x, y, x_adv):

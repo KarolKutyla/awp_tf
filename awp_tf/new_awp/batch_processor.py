@@ -62,6 +62,20 @@ class BatchProcessor:
 
 
     @tf.function(jit_compile=True)
+    def awp_train_step_subset(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        self._weight_calculator.initiate_state_for_batch_process()
+        x_batch_adv = self._attack.generate(x_batch, y_batch)
+        batch_size = x_batch.shape[0]
+        self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
+        self._weight_calculator.append_weight_perturbations()
+
+        robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
+        self._weight_calculator.subtract_weight_perturbations()
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=ctx.logits_clean)
+        return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
+
+
+    @tf.function(jit_compile=True)
     def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
         robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
