@@ -1,5 +1,7 @@
 from dataclasses import dataclass, replace
 
+import keras
+
 from awp_tf.losses.loss_context import LossContext
 from awp_tf.losses import loss, trades_loss, adversarial_categorical_cross_entropy, loss_context
 
@@ -7,8 +9,9 @@ import tensorflow as tf
 
 @dataclass(frozen=True)
 class WeightParams:
-    awp_steps: int = 1
-    step_size: float = 5.0e-4
+    weight_constraint: float = 1.0e-2
+    step_size: float = 1.0e-2
+
 
 class WeightCalculator:
     def __init__(
@@ -29,76 +32,82 @@ class WeightCalculator:
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
         self.step_size = tf.constant(self._params.step_size, dtype=self._dtype)
-        self._awp_steps = tf.constant(self._params.awp_steps, dtype=tf.int32)
 
-        self._indices_of_selected_layers = [i for i, tracked in enumerate(self._perturbed_layers) if tracked]
-        self._saved_weights: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
-        self._weight_perturbations: list[tf.Variable | None] = _make_weight_perturbation_storage(self._classifier, self._perturbed_layers)
-        self._weight_norms: list[tf.Variable | None] = _make_weight_norms_storage(self._classifier, self._perturbed_layers)
-
-
-    def reset_weight_perturbations(self) -> None:
-        for idx in self._indices_of_selected_layers:
-            self._saved_weights[idx].assign(self._classifier.trainable_variables[idx])
-            self._weight_perturbations[idx].assign(tf.zeros_like(self._classifier.trainable_variables[idx]))
-            self._weight_norms[idx].assign(tf.norm(self._classifier.trainable_variables[idx]))
+        self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, tracked in enumerate(self._perturbed_layers) if tracked)
+        self._saved_weights: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
+        self._weight_perturbations: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
+        self._weight_norms: tuple[tf.Variable, ...] = _initiate_memory_for_weight_norms(self._weight_perturbations)
 
 
-    def apply_weight_perturbations(self):
-        for idx in self._indices_of_selected_layers:
-            self._classifier.trainable_variables[idx].assign(self._saved_weights[idx] + self._weight_perturbations[idx])
+    def initiate_state_for_batch_process(self) -> None:
+        for i, classifier_idx in enumerate(self._indices_of_selected_layers):
+            self._saved_weights[i].assign(self._classifier.trainable_variables[classifier_idx])
+            self._weight_perturbations[i].assign(tf.zeros_like(self._classifier.trainable_variables[classifier_idx]))
+            self._weight_norms[i].assign(tf.norm(self._classifier.trainable_variables[classifier_idx]))
 
 
-    def restore_model(self):
-        for idx in self._indices_of_selected_layers:
-            self._classifier.trainable_variables[idx].assign(self._saved_weights[idx])
+    def append_weight_perturbations(self):
+        for idx, perturbation in zip(self._indices_of_selected_layers, self._weight_perturbations):
+            self._classifier.trainable_variables[idx].assign_add(perturbation)
 
 
     def subtract_weight_perturbations(self) -> None:
-        for idx in self._indices_of_selected_layers:
-            self._classifier.trainable_variables[idx].assign_sub(self._weight_perturbations[idx])
+        for idx, perturbation in zip(self._indices_of_selected_layers, self._weight_perturbations):
+            self._classifier.trainable_variables[idx].assign_sub(perturbation)
 
 
-    def calculate_weight_perturbation(self, ctx: LossContext) -> None:
-        i0 = tf.constant(0, dtype=tf.int32)
-
-        def cond(i, ctx):
-            return i < self._awp_steps
-
-        _, _ = tf.nest.map_structure(
-            tf.stop_gradient,
-            tf.while_loop(cond, self._calculate_weight_perturbation_body, [i0, ctx], parallel_iterations=1))
+    def restore_model(self):
+        for idx, old_value in zip(self._indices_of_selected_layers, self._saved_weights):
+            self._classifier.trainable_variables[idx].assign(old_value)
 
 
-    def _calculate_weight_perturbation_body(self, i, ctx: LossContext):
+    def calculate_weight_perturbation(self, x, y, x_adv) -> None:
+        gradient = self._calculate_gradient(x, y, x_adv)
+        for idx, perturbation, norm in zip(self._indices_of_selected_layers, self._weight_perturbations, self._weight_norms):
+            perturbation.assign(self._calculate_perturbation_for_single_layer(gradient[idx], norm.value()))
+
+
+    def _calculate_gradient(self, x, y, x_adv):
         with tf.GradientTape() as tape:
-            ctx = ctx._replace(logits_clean=self._classifier(ctx.x_batch, training=False), logits_adv=self._classifier(ctx.x_adv, training=False))
+            logits_clean = self._classifier(x, training=False)
+            logits_adv = self._classifier(x_adv, training=False)
+            ctx = LossContext(
+                x_batch=x,
+                x_adv=x_adv,
+                y_batch=y,
+                logits_clean=logits_clean,
+                logits_adv=logits_adv
+            )
             loss = self._loss.calculate(ctx)
-        gradient = tape.gradient(loss, self._classifier.trainable_variables)
-
-        for idx in self._indices_of_selected_layers:
-            if gradient[idx] is not None:
-                self._weight_perturbations[idx].assign(
-                    self._calculate_perturbation_for_single_trainable_variable(gradient[idx], idx))
-
-        self.apply_weight_perturbations()
-        return i + 1, ctx
+        selected_variables = tuple(
+            self._classifier.trainable_variables[idx]
+            for idx in self._indices_of_selected_layers
+        )
+        return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
 
-    def _calculate_perturbation_for_single_trainable_variable(self, weight_gradient: tf.Tensor, idx) -> tf.Tensor:
+    def _calculate_perturbation_for_single_layer(self, weight_gradient: tf.Tensor, weight_norm: tf.Tensor) -> tf.Tensor:
         step_direction = tf.math.divide_no_nan(weight_gradient, tf.norm(weight_gradient))
-        weight_perturbation = step_direction * self.step_size * self._weight_norms[idx]
-        return weight_perturbation
+        return step_direction * weight_norm * self.step_size
 
 
-def _make_weight_perturbation_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
-    return [tf.Variable(tf.zeros_like(variable), trainable=False) if perturbed else None
-            for variable, perturbed in zip(classifier.trainable_weights, perturbed_layers)]
+def _initiate_memory_for_weight_perturbations(classifier: keras.Model, indices_of_selected_layers: tuple[int, ...]) -> tuple[tf.Variable, ...]:
+    return tuple(
+        tf.Variable(
+            tf.zeros_like(classifier.trainable_weights[idx]),
+            trainable=False,
+        )
+        for idx in indices_of_selected_layers
+    )
 
 
-def _make_weight_norms_storage(classifier: tf.keras.models.Model, perturbed_layers: tuple[bool, ...]) -> list[tf.Variable | None]:
-    return [tf.Variable(tf.norm(variables), trainable=False) if perturbed else None
-            for variables, perturbed in zip(classifier.trainable_variables, perturbed_layers)]
+def _initiate_memory_for_weight_norms(weight_perturbations: tuple[tf.Variable, ...]) -> tuple[tf.Variable, ...]:
+    return tuple(
+        tf.Variable(
+            tf.norm(perturbation), trainable=False
+        )
+        for perturbation in weight_perturbations
+    )
 
 
 def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, ...]:
