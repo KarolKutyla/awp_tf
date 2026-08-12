@@ -50,24 +50,30 @@ class BatchProcessor:
 
     @tf.function(jit_compile=True)
     def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        self._weight_calculator.initiate_state_for_batch_process()
         x_batch_adv = self._attack.generate(x_batch, y_batch)
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
+
+        self._weight_calculator.initiate_state_for_batch_process()
         self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.append_weight_perturbations()
         _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.subtract_weight_perturbations()
 
-        logits_clean = self._classifier(x_batch, training=False)
-        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
-        logits_adv = self._classifier(x_batch_adv, training=False)
-        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
         return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     @tf.function(jit_compile=True)
     def awp_train_step_subset(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        self._weight_calculator.initiate_state_for_batch_process()
         x_batch_adv = self._attack.generate(x_batch, y_batch)
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
+
+        self._weight_calculator.initiate_state_for_batch_process()
         batch_size = x_batch.shape[0]
         batch_slice = int(batch_size*(3/4))
         self._weight_calculator.calculate_weight_perturbation(x_batch[batch_slice:], y_batch[batch_slice:], x_batch_adv[batch_slice:])
@@ -75,10 +81,6 @@ class BatchProcessor:
         _, _ = self._update_model_adversarial(x_batch[:batch_slice], y_batch[:batch_slice], x_batch_adv[:batch_slice])
         self._weight_calculator.subtract_weight_perturbations()
 
-        logits_clean = self._classifier(x_batch, training=False)
-        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
-        logits_adv = self._classifier(x_batch_adv, training=False)
-        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
         return clean_loss, logits_clean, adv_loss, logits_adv
 
 
