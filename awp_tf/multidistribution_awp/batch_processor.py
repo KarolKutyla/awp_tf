@@ -76,9 +76,14 @@ class BatchProcessor:
 
         self._weight_calculator.initiate_state_for_batch_process()
         self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv, x_batch_awp, y_batch_awp, x_batch_adv_awp)
+
         self._weight_calculator.append_weight_perturbations()
-        _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
+        with tf.GradientTape() as tape:
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_batch_adv)
+            robust_loss = self._robust_loss.calculate(ctx)
+        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
         self._weight_calculator.subtract_weight_perturbations()
+        self._classifier.optimizer.apply(gradient)
 
         return clean_loss, logits_clean, adv_loss, logits_adv
 
