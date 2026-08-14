@@ -72,6 +72,7 @@ class WeightCalculator:
             mixed_step = mixed_direction * norm * self.step_size
             perturbation.assign(mixed_step)
 
+
     def calculate_weight_perturbation_on_subset(self, x, y, x_adv) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
         for gradient, perturbation, norm in zip(gradients, self._weight_perturbations, self._weight_norms):

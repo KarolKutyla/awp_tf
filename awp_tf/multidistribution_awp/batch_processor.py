@@ -56,7 +56,7 @@ class BatchProcessor:
         adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
 
         self._weight_calculator.initiate_state_for_batch_process()
-        self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
+        self._weight_calculator.calculate_weight_perturbation_on_subset(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.append_weight_perturbations()
         _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
         self._weight_calculator.subtract_weight_perturbations()
