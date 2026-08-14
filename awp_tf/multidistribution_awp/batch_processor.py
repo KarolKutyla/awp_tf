@@ -89,6 +89,30 @@ class BatchProcessor:
 
 
     @tf.function(jit_compile=True)
+    def awp_train_step_separate_subset(self, x_batch, y_batch, x_batch_awp, y_batch_awp) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        x_batch_adv = self._attack.generate(x_batch, y_batch)
+        x_batch_adv_awp = self._attack.generate(x_batch_awp, y_batch_awp)
+
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
+
+        self._weight_calculator.initiate_state_for_batch_process()
+        self._weight_calculator.calculate_weight_perturbation_on_subset(x_batch_awp, y_batch_awp, x_batch_adv_awp)
+
+        self._weight_calculator.append_weight_perturbations()
+        with tf.GradientTape() as tape:
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_batch_adv)
+            robust_loss = self._robust_loss.calculate(ctx)
+        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
+        self._weight_calculator.subtract_weight_perturbations()
+        self._classifier.optimizer.apply(gradient)
+
+        return clean_loss, logits_clean, adv_loss, logits_adv
+
+
+    @tf.function(jit_compile=True)
     def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
         robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)

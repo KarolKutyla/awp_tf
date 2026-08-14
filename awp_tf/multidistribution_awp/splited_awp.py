@@ -216,7 +216,7 @@ class Trainer:
 
     def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_awp:tf.Tensor, y_batch_awp: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         if self._subset_enabled:
-            return self._trainer.awp_train_step_subset(x_batch, y_batch, x_batch_awp, y_batch_awp)
+            return self._trainer.awp_train_step_separate_subset(x_batch, y_batch, x_batch_awp, y_batch_awp)
         if not enable_adversarial:
             return self._non_adversarial_step(x_batch, y_batch)
         if warmup:
