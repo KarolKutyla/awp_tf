@@ -62,24 +62,28 @@ class WeightCalculator:
             self._classifier.trainable_variables[idx].assign(old_value)
 
 
-    def calculate_initial_weight_perturbation(self, x, y, x_adv) -> None:
-        gradients = self._calculate_gradient(x, y, x_adv)
-        for gradient, perturbation, norm in zip(gradients, self._weight_perturbations, self._weight_norms):
-            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self.step_size
-            perturbation.assign(step)
+    def calculate_weight_perturbation(
+            self,
+            base_data: tuple[tf.Tensor, ...],
+            additional_batch: tuple[tf.Tensor, ...],
+            second_additional_batch: tuple[tf.Tensor, ...]
+    ) -> None:
 
-
-    def calculate_second_weight_perturbation(self, x, y, x_adv) -> None:
+        x, y, x_adv = base_data
+        subset_x, subset_y, subset_x_adv = additional_batch
+        second_subset_x, second_subset_y, second_subset_x_adv = second_additional_batch
         gradients = self._calculate_gradient(x, y, x_adv)
-        for gradient, perturbation, norm in zip(gradients, self._weight_perturbations, self._weight_norms):
-            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self.step_size
-            mixed_perturbation = perturbation.value() + step
-            mixed_direction = tf.math.divide_no_nan(mixed_perturbation, tf.norm(mixed_perturbation))
+        subset_gradients = self._calculate_gradient(subset_x, subset_y, subset_x_adv)
+        second_subset_gradients = self._calculate_gradient(second_subset_x, second_subset_y, second_subset_x_adv)
+
+        for gradient, subset_gradient, second_subset_gradient, perturbation, norm in zip(gradients, subset_gradients, second_subset_gradients, self._weight_perturbations, self._weight_norms):
+            standard_step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
+            subset_step_direction = tf.math.divide_no_nan(subset_gradient, tf.norm(subset_gradient))
+            second_subset_step_direction = tf.math.divide_no_nan(second_subset_gradient, tf.norm(second_subset_gradient))
+            mixed_gradient = standard_step_direction + subset_step_direction, second_subset_step_direction
+            mixed_direction = tf.math.divide_no_nan(mixed_gradient, tf.norm(mixed_gradient))
             mixed_step = mixed_direction * norm * self.step_size
             perturbation.assign(mixed_step)
-
 
 
     def _calculate_gradient(self, x, y, x_adv):

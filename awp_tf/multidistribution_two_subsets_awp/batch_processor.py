@@ -4,7 +4,7 @@ import tensorflow as tf
 from tensorflow import keras
 
 from awp_tf.attacks.attack import TensorflowEvasionAttack
-from awp_tf.multidistribution_double_awp.weight_calculator import WeightCalculator, WeightParams
+from awp_tf.multidistribution_two_subsets_awp.weight_calculator import WeightCalculator, WeightParams
 
 from awp_tf.losses.loss import AdversarialLoss
 from awp_tf.losses.loss_context import LossContext
@@ -47,7 +47,13 @@ class BatchProcessor:
 
 
     @tf.function(jit_compile=True)
-    def awp_train_step(self, x_batch, y_batch, x_batch_awp, y_batch_awp) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def awp_train_step(
+            self,
+            base_data: tuple[tf.Tensor, ...],
+            additional_batch: tuple[tf.Tensor, ...],
+            second_additional_batch: tuple[tf.Tensor, ...]
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        x_batch, y_batch = base_data
         x_batch_adv = self._attack.generate(x_batch, y_batch)
 
         logits_clean = self._classifier(x_batch, training=False)
@@ -56,11 +62,10 @@ class BatchProcessor:
         adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
 
         self._weight_calculator.initiate_state_for_batch_process()
-        self._weight_calculator.calculate_initial_weight_perturbation(x_batch, y_batch, x_batch_adv)
-        self._weight_calculator.apply_weight_perturbations()
-
-        x_batch_adv_awp = self._attack.generate(x_batch_awp, y_batch_awp)
-        self._weight_calculator.calculate_second_weight_perturbation(x_batch_awp, y_batch_awp, x_batch_adv_awp)
+        self._weight_calculator.calculate_weight_perturbation(
+            tuple([x_batch, y_batch, x_batch_adv]),
+            tuple([additional_batch[0], additional_batch[1], self._attack.generate(additional_batch[0], additional_batch[1])]),
+            tuple([second_additional_batch[0], second_additional_batch[1], self._attack.generate(second_additional_batch[0], second_additional_batch[1])]))
         self._weight_calculator.apply_weight_perturbations()
 
         with tf.GradientTape() as tape:
