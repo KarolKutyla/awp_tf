@@ -11,7 +11,6 @@ import tensorflow as tf
 @dataclass(frozen=True)
 class WeightParams:
     weight_constraint: float = 1.0e-2
-    step_size: float = 1.0e-2
 
 
 class WeightCalculator:
@@ -31,7 +30,7 @@ class WeightCalculator:
 
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
-        self.step_size = tf.constant(self._params.step_size, dtype=self._dtype)
+        self._weight_constraint = self._params.weight_constraint
 
         self._perturbation_scales = _normalize_layer_scales(classifier, layers_selected_for_weight_perturbation)
         self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._perturbation_scales) if value != 0.0)
@@ -66,7 +65,7 @@ class WeightCalculator:
         gradients = self._calculate_gradient(x, y, x_adv)
         for i, (gradient, perturbation, norm) in enumerate(zip(gradients, self._weight_perturbations, self._weight_norms)):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self._perturbation_scales[i] * self.step_size
+            step = step_direction * norm * self._perturbation_scales[i] * self._weight_constraint
             perturbation.assign(step)
 
 
