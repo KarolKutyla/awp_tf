@@ -81,13 +81,6 @@ class WeightCalculator:
             perturbation.assign(mixed_step)
 
 
-    def calculate_weight_perturbation_on_subset(self, x, y, x_adv) -> None:
-        gradients = self._calculate_gradient(x, y, x_adv)
-        for gradient, perturbation, norm in zip(gradients, self._weight_perturbations, self._weight_norms):
-            standard_step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = standard_step_direction * norm * self.step_size
-            perturbation.assign(step)
-
 
     def _calculate_gradient(self, x, y, x_adv):
         with tf.GradientTape() as tape:
