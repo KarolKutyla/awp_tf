@@ -14,10 +14,6 @@ from awp_tf.losses.loss_context import LossContext
 @dataclass(frozen=True)
 class AWPParams:
     weight_constraint: float = 1.0e-2
-    step_size: float | None = None
-
-    def calc_step_size(self):
-        return self.weight_constraint
 
 
 class BatchProcessor:
@@ -41,8 +37,7 @@ class BatchProcessor:
         self._robust_loss: AdversarialLoss = adversarial_loss
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
-        step_size = self._params.step_size or self._params.calc_step_size()
-        weight_calculator_params = WeightParams(step_size=step_size)
+        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params, loss=self._robust_loss)
 
 
