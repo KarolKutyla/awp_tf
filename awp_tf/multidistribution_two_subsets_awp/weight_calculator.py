@@ -80,7 +80,7 @@ class WeightCalculator:
             standard_step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
             subset_step_direction = tf.math.divide_no_nan(subset_gradient, tf.norm(subset_gradient))
             second_subset_step_direction = tf.math.divide_no_nan(second_subset_gradient, tf.norm(second_subset_gradient))
-            mixed_gradient = standard_step_direction + subset_step_direction, second_subset_step_direction
+            mixed_gradient = standard_step_direction + subset_step_direction + second_subset_step_direction
             mixed_direction = tf.math.divide_no_nan(mixed_gradient, tf.norm(mixed_gradient))
             mixed_step = mixed_direction * norm * self.step_size
             perturbation.assign(mixed_step)
