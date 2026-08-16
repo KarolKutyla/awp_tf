@@ -18,7 +18,7 @@ class WeightCalculator:
     def __init__(
             self,
             classifier: tf.keras.Model,
-            layers_selected_for_weight_perturbation: tuple[bool, ...] | None,
+            layers_selected_for_weight_perturbation: tuple[bool | float, ...] | None,
             params: WeightParams | None = None,
             loss: AdversarialLoss = AdversarialSparseCategoricalCrossEntropy(),
             **overrides
@@ -27,14 +27,14 @@ class WeightCalculator:
         self._weight_constraint: tf.Tensor
         self._dtype = classifier.weights[0].dtype
         self._classifier = classifier
-        self._perturbed_layers: tuple[bool, ...] = layers_selected_for_weight_perturbation or select_default_trained_layers_tf(self._classifier)
         self._loss = loss
 
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
         self.step_size = tf.constant(self._params.step_size, dtype=self._dtype)
 
-        self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, tracked in enumerate(self._perturbed_layers) if tracked)
+        self._perturbation_scales = _normalize_layer_scales(classifier, layers_selected_for_weight_perturbation)
+        self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._perturbation_scales) if value != 0.0)
         self._saved_weights: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
         self._weight_perturbations: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
         self._weight_norms: tuple[tf.Variable, ...] = _initiate_memory_for_weight_norms(self._weight_perturbations)
@@ -64,9 +64,9 @@ class WeightCalculator:
 
     def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
-        for gradient, perturbation, norm in zip(gradients, self._weight_perturbations, self._weight_norms):
+        for i, (gradient, perturbation, norm) in enumerate(zip(gradients, self._weight_perturbations, self._weight_norms)):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self.step_size
+            step = step_direction * norm * self._perturbation_scales[i] * self.step_size
             perturbation.assign(step)
 
 
@@ -88,7 +88,23 @@ class WeightCalculator:
         )
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
+def _normalize_layer_scales(
+        classifier: tf.keras.Model,
+        scales: tuple[bool | float, ...] | None
+) -> tuple[float, ...]:
 
+    if scales is None:
+        return tuple(
+            1.0 if "kernel" in v.name else 0.0
+            for v in classifier.trainable_variables
+        )
+
+    return tuple(
+        1.0 if x is True else
+        0.0 if x is False else
+        float(x)
+        for x in scales
+    )
 
 def _initiate_memory_for_weight_perturbations(classifier: keras.Model, indices_of_selected_layers: tuple[int, ...]) -> tuple[tf.Variable, ...]:
     return tuple(

@@ -28,7 +28,7 @@ class Trainer:
             attack: TensorflowEvasionAttack,
             warmup: int = 0,
             adversarial_loss: AdversarialLoss | None = None,
-            trained_layers: tuple[bool, ...] | None = None,
+            trained_layers: tuple[bool | float, ...] | None = None,
             params: Params | None = None,
             subset_enabled = False,
             **overrides
@@ -43,7 +43,7 @@ class Trainer:
         self._warmup: int
         self._apply_wp: bool
         self._adversarial_loss: AdversarialLoss | None = adversarial_loss
-        self._tracked_layers: tuple[bool, ...] | None = trained_layers
+        self._tracked_layers: tuple[bool | float, ...] | None = trained_layers
 
         self._steps_per_epoch: int | None = None
         self._epochs_run = 0

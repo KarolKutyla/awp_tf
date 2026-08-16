@@ -27,7 +27,7 @@ class BatchProcessor:
             classifier: keras.Model,
             attack: TensorflowEvasionAttack,
             adversarial_loss: AdversarialLoss,
-            tracked_layers: tuple[bool, ...],
+            tracked_layers: tuple[bool | float, ...],
             params: AWPParams | None = None,
             **overrides
     ):
