@@ -18,6 +18,7 @@ from awp_tf.losses.adversarial_categorical_cross_entropy import AdversarialSpars
 @dataclass(frozen=True)
 class Params:
     mode: str = "trades"
+    regularization_parameter: int = 6
     protocol_params: AWPParams = AWPParams()
 
 class Trainer:
@@ -231,7 +232,7 @@ class Trainer:
 
     def _init_training_object(self):
         attack = self._attack
-        adversarial_loss = self._adversarial_loss or _select_adversarial_loss(self._params.mode)
+        adversarial_loss = self._adversarial_loss or _select_adversarial_loss(self._params.mode, self._params.regularization_parameter)
         tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._classifier)
 
         return BatchProcessor(
@@ -247,11 +248,11 @@ def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, 
         return tuple('kernel' in variable.name for variable in classifier.trainable_variables)
 
 
-def _select_adversarial_loss(mode: str) -> AdversarialLoss:
+def _select_adversarial_loss(mode: str, alpha = 0.5) -> AdversarialLoss:
     if mode == "pgd":
         return AdversarialSparseCategoricalCrossEntropy()
     if mode == "trades":
-        return TradesLoss()
+        return TradesLoss(regularization_parameter=alpha)
     else:
         raise Exception("Mode not provided! Chose pgd or trades.")
 
