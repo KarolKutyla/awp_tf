@@ -33,7 +33,6 @@ class PGDAttack(TensorflowEvasionAttack):
         self._norm = self._params.norm
 
 
-    @tf.function(reduce_retracing=True)
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         if self._norm == "linf":
             return self._generate_inf(x_batch, y_batch)
@@ -47,8 +46,8 @@ class PGDAttack(TensorflowEvasionAttack):
     def _generate_l2(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         x_adv = self._random_sample(x_batch)
         i0 = tf.constant(0, dtype=tf.int32)
-        invariant_shape = tf.TensorShape([None] + x_batch.shape[1:])
         norm_indices = tuple(range(1, len(x_batch.shape)))
+
         def cond(i, x):
             return i < self._pgd_step
 
@@ -58,7 +57,8 @@ class PGDAttack(TensorflowEvasionAttack):
 
         _, x_adv = tf.nest.map_structure(
             tf.stop_gradient,
-            tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1, shape_invariants=[i0.get_shape(), invariant_shape]))
+            tf.while_loop(cond, body, [i0, x_adv], parallel_iterations=1))
+
         return x_adv
 
 
