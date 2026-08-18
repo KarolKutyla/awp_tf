@@ -5,7 +5,6 @@ from tensorflow import keras
 
 from awp_tf.attacks.attack import TensorflowEvasionAttack
 from awp_tf.new_awp.weight_calculator import WeightCalculator, WeightParams
-from awp_tf.losses import loss_context
 
 from awp_tf.losses.loss import AdversarialLoss
 from awp_tf.losses.loss_context import LossContext
@@ -15,11 +14,6 @@ from awp_tf.losses.loss_context import LossContext
 @dataclass(frozen=True)
 class AWPParams:
     weight_constraint: float = 1.0e-2
-    step_size: float | None = None
-
-    def calc_step_size(self):
-        return self.weight_constraint
-
 
 
 class BatchProcessor:
@@ -29,7 +23,7 @@ class BatchProcessor:
             classifier: keras.Model,
             attack: TensorflowEvasionAttack,
             adversarial_loss: AdversarialLoss,
-            tracked_layers: tuple[bool, ...],
+            tracked_layers: tuple[bool | float, ...],
             params: AWPParams | None = None,
             **overrides
     ):
@@ -43,13 +37,12 @@ class BatchProcessor:
         self._robust_loss: AdversarialLoss = adversarial_loss
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
-        step_size = self._params.step_size or self._params.calc_step_size()
-        weight_calculator_params = WeightParams(step_size=step_size)
+        weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params, loss=self._robust_loss)
 
 
     @tf.function(jit_compile=True)
-    def awp_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def awp_train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_batch_adv = self._attack.generate(x_batch, y_batch)
         logits_clean = self._classifier(x_batch, training=False)
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
@@ -58,34 +51,19 @@ class BatchProcessor:
 
         self._weight_calculator.initiate_state_for_batch_process()
         self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
-        self._weight_calculator.append_weight_perturbations()
-        _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
-        self._weight_calculator.subtract_weight_perturbations()
+        self._weight_calculator.apply_weight_perturbations()
 
+        with tf.GradientTape() as tape:
+            ctx = self._calc_training_loss_context(x_batch, y_batch, x_batch_adv)
+            robust_loss = self._robust_loss.calculate(ctx)
+        gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
+        self._weight_calculator.restore_model()
+        self._classifier.optimizer.apply(gradient)
         return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     @tf.function(jit_compile=True)
-    def awp_train_step_subset(self, x_batch, y_batch, x_batch_awp, y_batch_awp) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        x_batch_adv = self._attack.generate(x_batch, y_batch)
-        logits_clean = self._classifier(x_batch, training=False)
-        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
-        logits_adv = self._classifier(x_batch_adv, training=False)
-        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
-
-        self._weight_calculator.initiate_state_for_batch_process()
-        x_batch_adv_awp = self._attack.generate(x_batch_awp, y_batch_awp)
-        self._weight_calculator.calculate_weight_perturbation(x_batch_awp, y_batch_awp, x_batch_adv_awp)
-        self._weight_calculator.append_weight_perturbations()
-
-        _, _ = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
-        self._weight_calculator.subtract_weight_perturbations()
-
-        return clean_loss, logits_clean, adv_loss, logits_adv
-
-
-    @tf.function(jit_compile=True)
-    def adv_train_step(self, x_batch, y_batch) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def adv_train_step(self, x_batch: tf.Tensor, y_batch:tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_adv = self._attack.generate(x_batch, y_batch)
         robust_loss, ctx = self._update_model_adversarial(x_batch, y_batch, x_adv)
 
