@@ -71,7 +71,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _pgd_l2_step(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor, norm_indices: tuple) -> tf.Tensor:
-        gradient = self._calculate_gradient(x_adv, y)
+        gradient = self._calculate_gradient(x, x_adv, y)
         gradient_norm = tf.sqrt(tf.reduce_sum(tf.square(gradient), axis=norm_indices, keepdims=True))
         gradient = (tf.math.divide_no_nan(gradient, gradient_norm))
         x_adv = x_adv + gradient * self._pgd_step_size
@@ -113,7 +113,7 @@ class PGDAttack(TensorflowEvasionAttack):
 
 
     def _pgd_linf_step(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
-        gradient = self._calculate_gradient(x_adv, y)
+        gradient = self._calculate_gradient(x, x_adv, y)
         gradient = tf.sign(gradient)
         x_adv = x_adv + gradient * self._pgd_step_size
 
