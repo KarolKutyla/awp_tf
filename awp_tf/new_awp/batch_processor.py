@@ -76,11 +76,13 @@ class BatchProcessor:
 
     @tf.function(jit_compile=True)
     def validation_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
-        x_adv = self._attack.generate(x_batch, y_batch)
-        ctx = self._calc_non_training_loss_context(x_batch, y_batch, x_adv)
-        clean_loss = self._clean_loss(y_batch, ctx.logits_clean)
-        robust_loss = self._robust_loss.calculate(ctx)
-        return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
+        x_batch_adv = self._attack.generate(x_batch, y_batch)
+        logits_clean = self._classifier(x_batch, training=False)
+        clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
+
+        return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     def _update_model_adversarial(self, x, y, x_adv):
