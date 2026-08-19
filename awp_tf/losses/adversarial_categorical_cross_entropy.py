@@ -7,10 +7,10 @@ from awp_tf.losses.loss_context import LossContext
 class AdversarialSparseCategoricalCrossEntropy(AdversarialLoss):
     def __init__(self):
         super().__init__()
+        self._loss: tf.losses.Loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     @tf.function
-    def calculate(self, loss_context: LossContext) -> tf.Tensor:
-        y = loss_context.y_batch
-        logits_adv = loss_context.logits_adv
-        loss = tf.losses.sparse_categorical_crossentropy(y, logits_adv, from_logits=True)
+    def calculate(self, x, y, x_adv, model, training: bool = False) -> tf.Tensor:
+        logits_adv = model(x_adv, training=training)
+        loss = self._loss(y, logits_adv)
         return loss

@@ -70,21 +70,12 @@ class WeightCalculator:
 
 
     def _calculate_gradient(self, x, y, x_adv):
-        with tf.GradientTape() as tape:
-            logits_clean = self._classifier(x, training=False)
-            logits_adv = self._classifier(x_adv, training=False)
-            ctx = LossContext(
-                x_batch=x,
-                x_adv=x_adv,
-                y_batch=y,
-                logits_clean=logits_clean,
-                logits_adv=logits_adv
-            )
-            loss = self._loss.calculate(ctx)
         selected_variables = tuple(
             self._classifier.trainable_variables[idx]
             for idx in self._indices_of_selected_layers
         )
+        with tf.GradientTape() as tape:
+            loss = self._loss.calculate(x, y, x_adv, self._classifier)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
 def _normalize_layer_scales(

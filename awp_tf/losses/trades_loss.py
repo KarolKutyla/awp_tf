@@ -13,12 +13,14 @@ class TradesLoss(AdversarialLoss):
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
     # @tf.function
-    def calculate(self, loss_context: LossContext) -> tf.Tensor:
-        y = loss_context.y_batch
-        logits = loss_context.logits_clean
-        logits_adv = loss_context.logits_adv
+    def calculate(self, x, y , x_adv, model, training: bool = False) -> tf.Tensor:
+        batch_size = tf.shape(x)[0]
+        xx = tf.concat([x, x_adv], axis=0)
+        logits = model(xx, training=training)
+        logits_clean = logits[:batch_size]
+        logits_adv = logits[batch_size:]
 
-        loss_clean = self._sparse_categorical_cross_entropy(y, logits)
+        loss_clean = self._sparse_categorical_cross_entropy(y, logits_clean)
         loss_kl = _kld_loss(logits, logits_adv)
         loss = loss_clean + loss_kl * self._regularization_parameter
         return loss / self._mean_factor
