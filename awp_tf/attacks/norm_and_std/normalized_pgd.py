@@ -136,7 +136,7 @@ class PGDAttack(TensorflowEvasionAttack):
         with tf.GradientTape() as tape:
             tape.watch(x_adv)
             model_scaled_x_adv = self._normalize(x_adv)
-            loss = self._loss.calculate_attack_loss(model_scaled_x, model_scaled_x_adv, y, self.model, training=False)
+            loss = self._loss.calculate_attack_loss(model_scaled_x, y, model_scaled_x_adv, self.model, training=False)
         gradient = tape.gradient(loss, x_adv)
         return gradient
 
