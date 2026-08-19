@@ -12,7 +12,7 @@ class TradesLoss(AdversarialLoss):
         self._mean_factor = tf.constant(regularization_parameter + 1.0, dtype=tf.float32)
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
-    # @tf.function
+
     def calculate(self, x, y , x_adv, model, training: bool = False) -> tf.Tensor:
         batch_size = tf.shape(x)[0]
         xx = tf.concat([x, x_adv], axis=0)
@@ -21,9 +21,19 @@ class TradesLoss(AdversarialLoss):
         logits_adv = logits[batch_size:]
 
         loss_clean = self._sparse_categorical_cross_entropy(y, logits_clean)
-        loss_kl = _kld_loss(logits, logits_adv)
+        loss_kl = _kld_loss(logits_clean, logits_adv)
         loss = loss_clean + loss_kl * self._regularization_parameter
         return loss / self._mean_factor
+
+
+    def calculate_attack_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model, training: bool = False):
+        batch_size = tf.shape(x)[0]
+        xx = tf.concat([x, x_adv], axis=0)
+        logits = model(xx, training=training)
+        logits_clean = logits[:batch_size]
+        logits_adv = logits[batch_size:]
+        return _kld_loss(logits_clean, logits_adv)
+
 
 def _kld_loss(logits, logits_adv):
     p = tf.nn.softmax(logits)

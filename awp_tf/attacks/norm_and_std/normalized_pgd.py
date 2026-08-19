@@ -3,6 +3,7 @@ import tensorflow as tf
 from dataclasses import dataclass, replace
 
 from awp_tf.attacks.attack import TensorflowEvasionAttack
+from awp_tf.losses.loss import AdversarialLoss
 
 
 @dataclass(frozen=True)
@@ -17,12 +18,14 @@ class PGDAttack(TensorflowEvasionAttack):
     def __init__(
             self,
             model: tf.keras.Model,
+            loss: AdversarialLoss,
             mean,
             std,
             params: PGDParams | None = None,
             **overrides
     ):
         super().__init__(model)
+        self._loss = loss
         self._dtype = tf.float32
         self._params = params or PGDParams()
         self._params = replace(self._params, **overrides)
@@ -128,13 +131,12 @@ class PGDAttack(TensorflowEvasionAttack):
         )
 
 
-    def _calculate_gradient(self, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
+    def _calculate_gradient(self, x: tf.Tensor, x_adv: tf.Tensor, y: tf.Tensor) -> tf.Tensor:
+        model_scaled_x = self._normalize(x)
         with tf.GradientTape() as tape:
             tape.watch(x_adv)
             model_scaled_x_adv = self._normalize(x_adv)
-            logits = self.model(model_scaled_x_adv, training=False)
-            loss = tf.keras.losses.sparse_categorical_crossentropy(y, logits, from_logits=True)
-            loss = tf.reduce_mean(loss)
+            loss = self._loss.calculate_attack_loss(model_scaled_x, model_scaled_x_adv, y, self.model, training=False)
         gradient = tape.gradient(loss, x_adv)
         return gradient
 

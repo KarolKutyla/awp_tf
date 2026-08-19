@@ -14,3 +14,9 @@ class AdversarialSparseCategoricalCrossEntropy(AdversarialLoss):
         logits_adv = model(x_adv, training=training)
         loss = self._loss(y, logits_adv)
         return loss
+
+    @tf.function
+    def calculate_attack_loss(self, x, y, x_adv, model, training: bool = False) -> tf.Tensor:
+        logits_adv = model(x_adv, training=training)
+        loss = self._loss(y, logits_adv)
+        return loss
