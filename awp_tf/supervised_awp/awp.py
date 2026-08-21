@@ -211,7 +211,7 @@ class Trainer:
         self._robust_accuracy_metric.reset_state()
 
 
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt:tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         if not enable_adversarial:
             return self._non_adversarial_step(x_batch, y_batch)
         if warmup:
