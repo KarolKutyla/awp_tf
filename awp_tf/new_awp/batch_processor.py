@@ -38,7 +38,7 @@ class BatchProcessor:
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 
         weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint)
-        self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, tracked_layers, weight_calculator_params, loss=self._robust_loss)
+        self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, self._robust_loss, tracked_layers, weight_calculator_params)
 
 
     @tf.function(jit_compile=True)
@@ -71,7 +71,7 @@ class BatchProcessor:
 
         robust_loss = self._update_model_adversarial(x_batch, y_batch, x_batch_adv)
 
-        return clean_loss, logits_clean, robust_loss, logits_adv
+        return clean_loss, logits_clean, adv_loss, logits_adv
 
 
     @tf.function(jit_compile=True)

@@ -1,25 +1,24 @@
 from dataclasses import dataclass, replace
 
-import keras
-
-from awp_tf.losses.loss_context import LossContext
-from awp_tf.losses.loss import AdversarialLoss
-from awp_tf.losses.adversarial_categorical_cross_entropy import AdversarialSparseCategoricalCrossEntropy
-
-import tensorflow as tf
 
 @dataclass(frozen=True)
 class WeightParams:
     weight_constraint: float = 1.0e-2
 
 
+import tensorflow as tf
+from tensorflow import keras
+
+from awp_tf.losses.loss import AdversarialLoss
+
+
 class WeightCalculator:
     def __init__(
             self,
             classifier: tf.keras.Model,
+            loss: AdversarialLoss,
             layers_selected_for_weight_perturbation: tuple[bool | float, ...] | None,
             params: WeightParams | None = None,
-            loss: AdversarialLoss = AdversarialSparseCategoricalCrossEntropy(),
             **overrides
     ):
         self.step_size: tf.Tensor
@@ -63,9 +62,9 @@ class WeightCalculator:
 
     def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
-        for i, (gradient, perturbation, norm) in enumerate(zip(gradients, self._weight_perturbations, self._weight_norms)):
+        for idx, gradient, perturbation, norm in zip(self._indices_of_selected_layers, gradients, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self._perturbation_scales[i] * self._weight_constraint
+            step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
             perturbation.assign(step)
 
 
@@ -77,6 +76,7 @@ class WeightCalculator:
         with tf.GradientTape() as tape:
             loss = self._loss.calculate(x, y, x_adv, self._classifier)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
+
 
 def _normalize_layer_scales(
         classifier: tf.keras.Model,
