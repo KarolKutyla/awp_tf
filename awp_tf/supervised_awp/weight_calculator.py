@@ -11,6 +11,7 @@ import tensorflow as tf
 @dataclass(frozen=True)
 class WeightParams:
     weight_constraint: float = 1.0e-2
+    alternate_distribution_tradeoff: float = 0.5
 
 
 class WeightCalculator:
@@ -24,13 +25,14 @@ class WeightCalculator:
     ):
         self.step_size: tf.Tensor
         self._weight_constraint: tf.Tensor
-        self._dtype = classifier.weights[0].dtype
+        self._data_dtype = classifier.weights[0].dtype
         self._classifier = classifier
         self._loss = loss
 
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
         self._weight_constraint = self._params.weight_constraint
+        self._alternate_distribution_tradeoff = tf.clip_by_value(tf.constant(self._params.alternate_distribution_tradeoff, dtype=self._data_dtype), clip_value_min=0.0, clip_value_max=1.0)
 
         self._perturbation_scales = _normalize_layer_scales(classifier, layers_selected_for_weight_perturbation)
         self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._perturbation_scales) if value != 0.0)
@@ -65,7 +67,7 @@ class WeightCalculator:
         gradients = self._calculate_gradient(x, y, x_adv)
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
         for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
-            both_gradients = gradient + gradients_alt
+            both_gradients = gradient * (tf.constant(1.0, dtype=self._data_dtype) - self._alternate_distribution_tradeoff) + gradients_alt * self._alternate_distribution_tradeoff
             step_direction = tf.math.divide_no_nan(both_gradients, tf.norm(both_gradients))
             step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
             perturbation.assign(step)
