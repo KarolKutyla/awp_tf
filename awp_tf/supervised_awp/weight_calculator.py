@@ -17,9 +17,9 @@ class WeightCalculator:
     def __init__(
             self,
             classifier: tf.keras.Model,
+            loss: AdversarialLoss,
             layers_selected_for_weight_perturbation: tuple[bool | float, ...] | None,
             params: WeightParams | None = None,
-            loss: AdversarialLoss = AdversarialSparseCategoricalCrossEntropy(),
             **overrides
     ):
         self.step_size: tf.Tensor
@@ -64,32 +64,23 @@ class WeightCalculator:
     def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, x_alt: tf.Tensor, y_alt: tf.Tensor, x_adv_alt: tf.Tensor) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
-        for i, (gradient, gradient_alt, perturbation, norm) in enumerate(zip(gradients, gradients_alt, self._weight_perturbations, self._weight_norms)):
-            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            alt_step_direction = tf.math.divide_no_nan(gradient_alt, tf.norm(gradient_alt))
-            mixed_direction = step_direction + alt_step_direction
-            normalized_mixed_direction = tf.math.divide_no_nan(mixed_direction, tf.norm(mixed_direction))
-            mixed_step = normalized_mixed_direction * norm * self._perturbation_scales[i] * self._weight_constraint
-            perturbation.assign(mixed_step)
+        for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
+            both_gradients = gradient + gradients_alt
+            step_direction = tf.math.divide_no_nan(both_gradients, tf.norm(both_gradients))
+            step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
+            perturbation.assign(step)
 
 
     def _calculate_gradient(self, x, y, x_adv):
-        with tf.GradientTape() as tape:
-            logits_clean = self._classifier(x, training=False)
-            logits_adv = self._classifier(x_adv, training=False)
-            ctx = LossContext(
-                x_batch=x,
-                x_adv=x_adv,
-                y_batch=y,
-                logits_clean=logits_clean,
-                logits_adv=logits_adv
-            )
-            loss = self._loss.calculate(ctx)
         selected_variables = tuple(
             self._classifier.trainable_variables[idx]
             for idx in self._indices_of_selected_layers
         )
+        with tf.GradientTape() as tape:
+            loss = self._loss.calculate(x, y, x_adv, self._classifier, training=False)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
+
+
 
 def _normalize_layer_scales(
         classifier: tf.keras.Model,
