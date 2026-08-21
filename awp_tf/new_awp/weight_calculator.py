@@ -74,7 +74,7 @@ class WeightCalculator:
             for idx in self._indices_of_selected_layers
         )
         with tf.GradientTape() as tape:
-            loss = self._loss.calculate(x, y, x_adv, self._classifier)
+            loss = self._loss.calculate(x, y, x_adv, self._classifier, training=False)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
 
