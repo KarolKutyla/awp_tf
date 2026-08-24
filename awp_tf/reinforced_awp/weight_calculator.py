@@ -65,15 +65,10 @@ class WeightCalculator:
         gradients = self._calculate_gradient(x, y, x_adv)
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
         for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
-            base = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            gradient_alt_masked = tf.where(tf.sign(gradient) == tf.sign(gradient_alt), gradient_alt, tf.zeros_like(gradient_alt))
-            support = tf.math.divide_no_nan(gradient_alt_masked, tf.norm(gradient_alt_masked))
-
-            base_magnitude = tf.constant(1.0, dtype=self._data_dtype) - self._alternate_distribution_tradeoff
-            base_and_support = base * base_magnitude + support * self._alternate_distribution_tradeoff
-
-            step_direction = tf.math.divide_no_nan(base_and_support, tf.norm(base_and_support))
-            step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
+            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
+            mask = tf.where(tf.sign(gradient) == tf.sign(gradient_alt), tf.ones_like(gradient_alt), tf.zeros_like(gradient_alt))
+            masked_direction = step_direction * mask
+            step = masked_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
             perturbation.assign(step)
 
 
