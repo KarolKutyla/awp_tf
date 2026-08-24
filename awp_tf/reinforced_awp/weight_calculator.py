@@ -66,6 +66,7 @@ class WeightCalculator:
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
         for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
+            step_direction = tf.math.abs(step_direction) * step_direction
             mask = tf.where(tf.sign(gradient) == tf.sign(gradient_alt), tf.ones_like(gradient_alt), tf.zeros_like(gradient_alt))
             masked_direction = step_direction * mask
             step = masked_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
