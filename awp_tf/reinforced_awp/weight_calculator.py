@@ -65,12 +65,26 @@ class WeightCalculator:
         gradients = self._calculate_gradient(x, y, x_adv)
         gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
         for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
+            alpha = tf.constant(0.5, dtype=self._data_dtype)
+            compared_gradients = tf.math.divide_no_nan(
+                tf.abs(gradient_alt) - tf.abs(gradient),
+                tf.abs(gradient) + tf.abs(gradient_alt)
+            )
+            score = 1.0 + compared_gradients * alpha
+
+            same_sign = (
+                    (gradient == 0)
+                    | (gradient_alt == 0)
+                    | (tf.sign(gradient) == tf.sign(gradient_alt))
+            )
+            mask = tf.cast(same_sign, gradient.dtype)
+
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step_direction = tf.math.abs(step_direction) * step_direction
-            mask = tf.where(tf.sign(gradient) == tf.sign(gradient_alt), tf.ones_like(gradient_alt), tf.zeros_like(gradient_alt))
             masked_direction = step_direction * mask
             step = masked_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
-            perturbation.assign(step)
+            scored_step = step * score
+            perturbation.assign(scored_step)
+
 
 
     def _calculate_gradient(self, x, y, x_adv):
