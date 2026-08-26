@@ -4,10 +4,9 @@ import tensorflow as tf
 from tensorflow import keras
 
 from awp_tf.attacks.attack import TensorflowEvasionAttack
-from awp_tf.new_awp.weight_calculator import WeightCalculator, WeightParams
+from awp_tf.reinforced_awp.weight_calculator import WeightCalculator, WeightParams
 
 from awp_tf.losses.loss import AdversarialLoss
-from awp_tf.losses.loss_context import LossContext
 
 
 
@@ -40,17 +39,17 @@ class BatchProcessor:
         weight_calculator_params = WeightParams(weight_constraint=self._params.weight_constraint)
         self._weight_calculator: WeightCalculator = WeightCalculator(self._classifier, self._robust_loss, tracked_layers, weight_calculator_params)
 
-
     @tf.function(jit_compile=True)
-    def awp_train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def awp_train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt: tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         x_batch_adv = self._attack.generate(x_batch, y_batch)
+        x_batch_adv_alt = self._attack.generate(x_batch_alt, y_batch_alt)
         logits_clean = self._classifier(x_batch, training=False)
         clean_loss = self._clean_loss(y_true=y_batch, y_pred=logits_clean)
         logits_adv = self._classifier(x_batch_adv, training=False)
         adv_loss = self._clean_loss(y_true=y_batch, y_pred=logits_adv)
 
         self._weight_calculator.initiate_state_for_batch_process()
-        self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv)
+        self._weight_calculator.calculate_weight_perturbation(x_batch, y_batch, x_batch_adv, x_batch_alt, y_batch_alt, x_batch_adv_alt)
         self._weight_calculator.apply_weight_perturbations()
 
         with tf.GradientTape() as tape:
@@ -59,7 +58,6 @@ class BatchProcessor:
         self._weight_calculator.restore_model()
         self._classifier.optimizer.apply(gradient)
         return clean_loss, logits_clean, adv_loss, logits_adv
-
 
     @tf.function(jit_compile=True)
     def adv_train_step(self, x_batch: tf.Tensor, y_batch:tf.Tensor) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
@@ -87,35 +85,10 @@ class BatchProcessor:
 
     def _update_model_adversarial(self, x, y, x_adv):
         with tf.GradientTape() as tape:
-            robust_loss = self._robust_loss.calculate(x, y, x_adv, self._classifier)
+            robust_loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=True)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply(gradient)
         return robust_loss
-
-
-
-    def _calc_training_loss_context(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor) -> LossContext:
-        return self._calc_loss_context(x, y, x_adv, True)
-
-
-    def _calc_non_training_loss_context(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor) -> LossContext:
-        return self._calc_loss_context(x, y, x_adv, False)
-
-
-    def _calc_loss_context(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, training: bool):
-        batch_size = tf.shape(x)[0]
-        xx = tf.concat([x, x_adv], axis=0)
-        logits = self._classifier(xx, training=training)
-        logits_clean = logits[:batch_size]
-        logits_adv = logits[batch_size:]
-        ctx = LossContext(
-            x_batch=x,
-            x_adv=x_adv,
-            y_batch=y,
-            logits_clean=logits_clean,
-            logits_adv=logits_adv
-        )
-        return ctx
 
 
 def _validate_optimizer(classifier: keras.models.Model):

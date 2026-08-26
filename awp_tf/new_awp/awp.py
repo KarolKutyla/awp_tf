@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
-from awp_tf.new_awp.batch_processor import BatchProcessor, AWPParams
+from awp_tf.reinforced_awp.batch_processor import BatchProcessor, AWPParams
 from awp_tf.attacks.attack import TensorflowEvasionAttack
 from awp_tf.callbacks.progbar_logger import ProgbarLogger
 from awp_tf.callbacks.checkpoint_callback import EpochCheckpoint
@@ -141,8 +141,9 @@ class Trainer:
         start_time = time.time()
         warmup = epoch <= self._warmup
         normal_iter = iter(train_dataset)
-        for step, (x_batch, y_batch) in enumerate(normal_iter):
-            self._run_batch(x_batch, y_batch, step+1, warmup=warmup, enable_adversarial=enable_adversarial)
+        alt_iter = iter(train_dataset)
+        for step, ((x_batch, y_batch), (x_batch_alt, y_batch_alt)) in enumerate(zip(normal_iter, alt_iter)):
+            self._run_batch(x_batch, y_batch, x_batch_alt, y_batch_alt, step+1, warmup=warmup, enable_adversarial=enable_adversarial)
         end_time = time.time()
         train_time = end_time - start_time
 
@@ -173,10 +174,10 @@ class Trainer:
         self._callback_list.on_epoch_end(epoch, logs)
 
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step, warmup, enable_adversarial=True):
+    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt: tf.Tensor, step, warmup, enable_adversarial=True):
         self._callback_list.on_batch_begin(step)
 
-        batch_results = self._train_step(x_batch, y_batch, warmup=warmup, enable_adversarial=enable_adversarial)
+        batch_results = self._train_step(x_batch, y_batch, x_batch_alt, y_batch_alt, warmup=warmup, enable_adversarial=enable_adversarial)
         self._update_metrics(y_batch, batch_results)
         self._callback_list.on_batch_end(step, self._collect_train_logs())
 
@@ -210,13 +211,13 @@ class Trainer:
         self._robust_accuracy_metric.reset_state()
 
 
-    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+    def _train_step(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt: tf.Tensor, warmup: bool, enable_adversarial=True) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
         if not enable_adversarial:
             return self._non_adversarial_step(x_batch, y_batch)
         if warmup:
             return self._trainer.adv_train_step(x_batch, y_batch)
         else:
-            return self._trainer.awp_train_step(x_batch, y_batch)
+            return self._trainer.awp_train_step(x_batch, y_batch, x_batch_alt, y_batch_alt)
 
 
     @tf.function

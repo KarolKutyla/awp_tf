@@ -1,15 +1,15 @@
 from dataclasses import dataclass, replace
 
+import keras
+
+from awp_tf.losses.loss import AdversarialLoss
+
+import tensorflow as tf
 
 @dataclass(frozen=True)
 class WeightParams:
     weight_constraint: float = 1.0e-2
-
-
-import tensorflow as tf
-from tensorflow import keras
-
-from awp_tf.losses.loss import AdversarialLoss
+    alternate_distribution_tradeoff: float = 0.5
 
 
 class WeightCalculator:
@@ -23,13 +23,14 @@ class WeightCalculator:
     ):
         self.step_size: tf.Tensor
         self._weight_constraint: tf.Tensor
-        self._dtype = classifier.weights[0].dtype
+        self._data_dtype = classifier.weights[0].dtype
         self._classifier = classifier
         self._loss = loss
 
         self._params = params or WeightParams()
         self._params = replace(self._params, **overrides)
         self._weight_constraint = self._params.weight_constraint
+        self._alternate_distribution_tradeoff = tf.clip_by_value(tf.constant(self._params.alternate_distribution_tradeoff, dtype=self._data_dtype), clip_value_min=0.0, clip_value_max=1.0)
 
         self._perturbation_scales = _normalize_layer_scales(classifier, layers_selected_for_weight_perturbation)
         self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._perturbation_scales) if value != 0.0)
@@ -60,12 +61,43 @@ class WeightCalculator:
             self._classifier.trainable_variables[idx].assign(old_value)
 
 
-    def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor) -> None:
+    def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, x_alt: tf.Tensor, y_alt: tf.Tensor, x_adv_alt: tf.Tensor) -> None:
         gradients = self._calculate_gradient(x, y, x_adv)
-        for idx, gradient, perturbation, norm in zip(self._indices_of_selected_layers, gradients, self._weight_perturbations, self._weight_norms):
+        gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
+        for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
+            alpha = tf.constant(0.5, dtype=self._data_dtype)
+            compared_gradients = tf.math.divide_no_nan(
+                tf.abs(gradient_alt) - tf.abs(gradient),
+                tf.abs(gradient) + tf.abs(gradient_alt)
+            )
+
+            grad_sign = tf.sign(gradient)
+            grad_alt_sign = tf.sign(gradient_alt)
+            grad_same_sign = grad_sign == grad_alt_sign | (gradient == 0) | (gradient_alt == 0)
+            grad_abs = tf.abs(gradient)
+            grad_alt_abs = tf.abs(gradient_alt)
+
+            gradient_scaled_mask = tf.cast(
+                grad_same_sign,
+                gradient.dtype
+            )
+            scaled_score = 1.0 + compared_gradients * alpha
+            scaled_scores = gradient_scaled_mask * scaled_score
+
+            gradient_negated_mask = tf.cast(
+                tf.logical_not(grad_same_sign) & (grad_abs > grad_alt_abs),
+                gradient.dtype
+            )
+
+            negated_score = compared_gradients * alpha
+            negated_scores = gradient_negated_mask * negated_score
+
+            scores = scaled_scores + negated_scores
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
             step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
-            perturbation.assign(step)
+            scored_step = step * scores
+            perturbation.assign(scored_step)
+
 
 
     def _calculate_gradient(self, x, y, x_adv):
@@ -76,6 +108,7 @@ class WeightCalculator:
         with tf.GradientTape() as tape:
             loss = self._loss.calculate(x, y, x_adv, self._classifier, training=False)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
+
 
 
 def _normalize_layer_scales(
