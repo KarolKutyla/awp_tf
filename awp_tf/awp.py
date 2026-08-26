@@ -7,7 +7,7 @@ import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
 from awp_tf.batch_processor import BatchProcessor, AWPParams
-from awp_tf.attacks.attack import TensorflowEvasionAttack
+from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.callbacks.progbar_logger import ProgbarLogger
 from awp_tf.callbacks.checkpoint_callback import EpochCheckpoint
 from awp_tf.losses.loss import AdversarialLoss
@@ -25,7 +25,7 @@ class Trainer:
     def __init__(
             self,
             classifier: tf.keras.Model,
-            attack: TensorflowEvasionAttack,
+            attack: EvasionAttack,
             warmup: int = 0,
             adversarial_loss: AdversarialLoss | None = None,
             trained_layers: tuple[bool, ...] | None = None,
@@ -38,7 +38,7 @@ class Trainer:
         self._params = replace(self._params, **overrides)
 
         self._classifier: tf.keras.Model = classifier
-        self._attack: TensorflowEvasionAttack = attack
+        self._attack: EvasionAttack = attack
         self._warmup: int
         self._apply_wp: bool
         self._adversarial_loss: AdversarialLoss | None = adversarial_loss

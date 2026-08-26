@@ -2,7 +2,7 @@ import tensorflow as tf
 
 from dataclasses import dataclass, replace
 
-from awp_tf.attacks.attack import TensorflowEvasionAttack
+from awp_tf.attacks.attack import EvasionAttack
 
 
 @dataclass(frozen=True)
@@ -13,7 +13,7 @@ class PGDParams:
     norm: str = "linf"
 
 
-class PGDAttack(TensorflowEvasionAttack):
+class PGDAttack(EvasionAttack):
     def __init__(
             self,
             model: tf.keras.Model,

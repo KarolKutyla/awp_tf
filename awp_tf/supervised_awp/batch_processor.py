@@ -3,7 +3,7 @@ from dataclasses import dataclass, replace
 import tensorflow as tf
 from tensorflow import keras
 
-from awp_tf.attacks.attack import TensorflowEvasionAttack
+from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.supervised_awp.weight_calculator import WeightCalculator, WeightParams
 
 from awp_tf.losses.loss import AdversarialLoss
@@ -20,7 +20,7 @@ class BatchProcessor:
     def __init__(
             self,
             classifier: keras.Model,
-            attack: TensorflowEvasionAttack,
+            attack: EvasionAttack,
             adversarial_loss: AdversarialLoss,
             tracked_layers: tuple[bool | float, ...],
             params: AWPParams | None = None,
@@ -32,7 +32,7 @@ class BatchProcessor:
 
         self._classifier: tf.keras.Model = classifier
         _validate_optimizer(self._classifier)
-        self._attack: TensorflowEvasionAttack = attack
+        self._attack: EvasionAttack = attack
         self._robust_loss: AdversarialLoss = adversarial_loss
         self._clean_loss = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
 

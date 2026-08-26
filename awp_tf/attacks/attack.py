@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 import tensorflow as tf
 
-class TensorflowEvasionAttack(ABC):
+class EvasionAttack(ABC):
 
     def __init__(self, model: tf.keras.Model):
         self.model = model
