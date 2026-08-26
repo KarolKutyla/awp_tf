@@ -2,25 +2,15 @@ from __future__ import absolute_import, division, print_function, unicode_litera
 
 from abc import ABC, abstractmethod
 import time
-from dataclasses import dataclass, replace
 
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
-from awp_tf.new_awp.batch_processor import BatchProcessor, AWPParams
 from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.callbacks.progbar_logger import ProgbarLogger
 from awp_tf.callbacks.checkpoint_callback import EpochCheckpoint
 from awp_tf.losses.loss import AdversarialLoss
-from awp_tf.losses.trades_loss import TradesLoss
-from awp_tf.losses.adversarial_categorical_cross_entropy import AdversarialSparseCategoricalCrossEntropy
 
-
-@dataclass(frozen=True)
-class Params:
-    mode: str = "trades"
-    regularization_parameter: int = 6
-    protocol_params: AWPParams = AWPParams()
 
 class Trainer(ABC):
 
@@ -28,29 +18,16 @@ class Trainer(ABC):
             self,
             classifier: tf.keras.Model,
             attack: EvasionAttack,
-            warmup: int = 0,
-            adversarial_loss: AdversarialLoss | None = None,
-            trained_layers: tuple[bool | float, ...] | None = None,
-            params: Params | None = None,
-            subset_enabled = False,
-            **overrides
+            adversarial_loss: AdversarialLoss
     ):
         self._fast_mode = True
 
-        self._params = params or Params()
-        self._params = replace(self._params, **overrides)
-
         self._classifier: tf.keras.Model = classifier
         self._attack: EvasionAttack = attack
-        self._warmup: int
-        self._apply_wp: bool
-        self._adversarial_loss: AdversarialLoss | None = adversarial_loss
-        self._tracked_layers: tuple[bool | float, ...] | None = trained_layers
+        self._robust_loss: AdversarialLoss = adversarial_loss
 
         self._steps_per_epoch: int | None = None
         self._epochs_run = 0
-        self._trainer: BatchProcessor
-        self._warmup = warmup
 
         self._progbar: tf.keras.utils.Progbar
         self._callback_list: tf.keras.callbacks.CallbackList
@@ -61,7 +38,6 @@ class Trainer(ABC):
         self._clean_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
         self._robust_loss_metric = tf.keras.metrics.Mean()
         self._robust_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
-        self._subset_enabled = subset_enabled
 
 
     def fit(
@@ -120,7 +96,6 @@ class Trainer(ABC):
         self._callback_list = tf.keras.callbacks.CallbackList(callbacks, add_history=True, model=self._classifier)
 
         self._callback_list.on_train_begin()
-        self._trainer = self._init_training_object()
 
         for epoch in range(nb_epochs):
             self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
@@ -185,8 +160,17 @@ class Trainer(ABC):
 
     def _run_validation(self, validation_dataset):
         for x_batch, y_batch in validation_dataset:
-            batch_results = self._trainer.validation_step(x_batch, y_batch)
+            batch_results = self._validation(x_batch, y_batch)
             self._update_metrics(y_batch, batch_results)
+
+    def _validation(self, x_batch, y_batch):
+        x_batch_adv = self._attack.generate(x_batch, y_batch)
+        logits_clean = self._classifier(x_batch, training=False)
+        loss_on_clean_examples = self._classifier.loss(y_true=y_batch, y_pred=logits_clean)
+        logits_adv = self._classifier(x_batch_adv, training=False)
+        loss_on_adversarial_examples = self._classifier.loss(y_true=y_batch, y_pred=logits_adv)
+
+        return loss_on_clean_examples, logits_clean, loss_on_adversarial_examples, logits_adv
 
 
     def _update_metrics(self, y_batch, batch_results: tuple):
@@ -202,31 +186,3 @@ class Trainer(ABC):
         self._clean_accuracy_metric.reset_state()
         self._robust_loss_metric.reset_state()
         self._robust_accuracy_metric.reset_state()
-
-
-    def _init_training_object(self):
-        attack = self._attack
-        adversarial_loss = self._adversarial_loss or _select_adversarial_loss(self._params.mode, self._params.regularization_parameter)
-        tracked_layers = self._tracked_layers or select_default_trained_layers_tf(self._classifier)
-
-        return BatchProcessor(
-            self._classifier,
-            attack,
-            adversarial_loss,
-            tracked_layers=tracked_layers,
-            params=self._params.protocol_params
-        )
-
-
-def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, ...]:
-        return tuple('kernel' in variable.name for variable in classifier.trainable_variables)
-
-
-def _select_adversarial_loss(mode: str, alpha = 0.5) -> AdversarialLoss:
-    if mode == "pgd":
-        return AdversarialSparseCategoricalCrossEntropy()
-    if mode == "trades":
-        return TradesLoss(regularization_parameter=alpha)
-    else:
-        raise Exception("Mode not provided! Chose pgd or trades.")
-

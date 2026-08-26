@@ -1,151 +1,80 @@
-from dataclasses import dataclass, replace
-
 import tensorflow as tf
 from tensorflow import keras
 
+from awp_tf.api.awp_params import AWPParams
 from awp_tf.losses.loss import AdversarialLoss
-
-@dataclass(frozen=True)
-class WeightParams:
-    weight_constraint: float = 1.0e-2
-    alternate_distribution_tradeoff: float = 0.5
+from awp_tf.attacks.attack import EvasionAttack
+from awp_tf.api.awp_operations import Calculator
 
 
-class WeightCalculator:
+class AWP:
     def __init__(
             self,
-            classifier: tf.keras.Model,
-            loss: AdversarialLoss,
-            layers_selected_for_weight_perturbation: tuple[bool | float, ...] | None,
-            params: WeightParams | None = None,
-            **overrides
+            classifier: keras.Model,
+            robust_loss:AdversarialLoss,
+            attack: EvasionAttack,
+            used_layers: tuple[float, ...],
+            awp_params: AWPParams = AWPParams()
     ):
-        self.step_size: tf.Tensor
-        self._weight_constraint: tf.Tensor
-        self._data_dtype = classifier.weights[0].dtype
         self._classifier = classifier
-        self._loss = loss
+        self._robust_loss = robust_loss
+        self._attack = attack
+        self._calculator = Calculator(self._classifier, used_layers, awp_params)
 
-        self._params = params or WeightParams()
-        self._params = replace(self._params, **overrides)
-        self._weight_constraint = self._params.weight_constraint
-        self._alternate_distribution_tradeoff = tf.clip_by_value(tf.constant(self._params.alternate_distribution_tradeoff, dtype=self._data_dtype), clip_value_min=0.0, clip_value_max=1.0)
-
-        self._perturbation_scales = _normalize_layer_scales(classifier, layers_selected_for_weight_perturbation)
-        self._indices_of_selected_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._perturbation_scales) if value != 0.0)
-        self._saved_weights: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
-        self._weight_perturbations: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(self._classifier, self._indices_of_selected_layers)
-        self._weight_norms: tuple[tf.Variable, ...] = _initiate_memory_for_weight_norms(self._weight_perturbations)
+        self._alternate_iteration = awp_params.alternate_iterations
+        self._awp_steps = awp_params.steps
 
 
-    def initiate_state_for_batch_process(self) -> None:
-        for i, classifier_idx in enumerate(self._indices_of_selected_layers):
-            self._saved_weights[i].assign(self._classifier.trainable_variables[classifier_idx])
-            self._weight_perturbations[i].assign(tf.zeros_like(self._classifier.trainable_variables[classifier_idx]))
-            self._weight_norms[i].assign(tf.norm(self._classifier.trainable_variables[classifier_idx]))
+    @tf.function(jit_compile=True)
+    def batch_process(
+            self,
+            x_batch: tf.Tensor,
+            y_batch: tf.Tensor,
+            x_batch_alt: tf.Tensor,
+            y_batch_alt: tf.Tensor
+    ) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+
+        original_x_batch_adv = self._attack.generate(x_batch, y_batch)
+        validation_data = self._validation_metrics(x_batch, y_batch, original_x_batch_adv)
+
+        self._calculator.initiate_state_for_batch_process(self._classifier)
+        x_batch_adv = original_x_batch_adv
+        for iteration in range(self._alternate_iteration):
+            if iteration > 0:
+                x_batch_adv = self._attack.generate(x_batch, y_batch)
+            x_batch_adv_alt = self._attack.generate(x_batch_alt, y_batch_alt)
+            for step in range(self._awp_steps):
+                gradients = self._calculate_gradient_for_perturbation(x_batch, y_batch, x_batch_adv)
+                alternate_distribution_gradients = self._calculate_gradient_for_perturbation(x_batch_alt, y_batch_alt, x_batch_adv_alt)
+                self._calculator.calculate_multi_batch_weight_perturbation(gradients, alternate_distribution_gradients)
+                self._calculator.apply_weight_perturbations(self._classifier)
+
+        gradient = self._calculate_gradient_for_update(x_batch, y_batch, original_x_batch_adv)
+        self._calculator.restore_original_weights(self._classifier)
+        self._classifier.optimizer.apply(gradient)
+
+        return validation_data
 
 
-    def apply_weight_perturbations(self):
-        for idx, perturbation, original_weight in zip(self._indices_of_selected_layers, self._weight_perturbations, self._saved_weights):
-            self._classifier.trainable_variables[idx].assign(original_weight.value() + perturbation.value())
-
-
-    def subtract_weight_perturbations(self) -> None:
-        for idx, perturbation in zip(self._indices_of_selected_layers, self._weight_perturbations):
-            self._classifier.trainable_variables[idx].assign_sub(perturbation)
-
-
-    def restore_model(self):
-        for idx, old_value in zip(self._indices_of_selected_layers, self._saved_weights):
-            self._classifier.trainable_variables[idx].assign(old_value)
-
-
-    def calculate_weight_perturbation(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, x_alt: tf.Tensor, y_alt: tf.Tensor, x_adv_alt: tf.Tensor) -> None:
-        gradients = self._calculate_gradient(x, y, x_adv)
-        gradients_alt = self._calculate_gradient(x_alt, y_alt, x_adv_alt)
-        for idx, gradient, gradient_alt, perturbation, norm in zip(self._indices_of_selected_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms):
-            alpha = tf.constant(0.5, dtype=self._data_dtype)
-            compared_gradients = tf.math.divide_no_nan(
-                tf.abs(gradient_alt) - tf.abs(gradient),
-                tf.abs(gradient) + tf.abs(gradient_alt)
-            )
-
-            grad_sign = tf.sign(gradient)
-            grad_alt_sign = tf.sign(gradient_alt)
-            grad_same_sign = (grad_sign == grad_alt_sign) | (gradient == 0) | (gradient_alt == 0)
-            grad_abs = tf.abs(gradient)
-            grad_alt_abs = tf.abs(gradient_alt)
-
-            gradient_scaled_mask = tf.cast(
-                grad_same_sign,
-                gradient.dtype
-            )
-            scaled_score = 1.0 + compared_gradients * alpha
-            scaled_scores = gradient_scaled_mask * scaled_score
-
-            gradient_negated_mask = tf.cast(
-                tf.logical_not(grad_same_sign) & (grad_abs > grad_alt_abs),
-                gradient.dtype
-            )
-
-            negated_score = compared_gradients * alpha
-            negated_scores = gradient_negated_mask * negated_score
-
-            scores = scaled_scores + negated_scores
-            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self._perturbation_scales[idx] * self._weight_constraint
-            scored_step = step * scores
-            perturbation.assign(scored_step)
-
-
-
-    def _calculate_gradient(self, x, y, x_adv):
+    def _calculate_gradient_for_perturbation(self, x, y, x_adv):
         selected_variables = tuple(
             self._classifier.trainable_variables[idx]
-            for idx in self._indices_of_selected_layers
+            for idx in self._calculator.get_applied_layers_indices()
         )
         with tf.GradientTape() as tape:
-            loss = self._loss.calculate(x, y, x_adv, self._classifier, training=False)
+            loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=False)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
 
-
-def _normalize_layer_scales(
-        classifier: tf.keras.Model,
-        scales: tuple[bool | float, ...] | None
-) -> tuple[float, ...]:
-
-    if scales is None:
-        return tuple(
-            1.0 if "kernel" in v.name else 0.0
-            for v in classifier.trainable_variables
-        )
-
-    return tuple(
-        1.0 if x is True else
-        0.0 if x is False else
-        float(x)
-        for x in scales
-    )
-
-def _initiate_memory_for_weight_perturbations(classifier: keras.Model, indices_of_selected_layers: tuple[int, ...]) -> tuple[tf.Variable, ...]:
-    return tuple(
-        tf.Variable(
-            tf.zeros_like(classifier.trainable_weights[idx]),
-            trainable=False,
-        )
-        for idx in indices_of_selected_layers
-    )
+    def _calculate_gradient_for_update(self, x, y, x_adv):
+        with tf.GradientTape() as tape:
+            robust_loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=True)
+        return tape.gradient(robust_loss, self._classifier.trainable_variables)
 
 
-def _initiate_memory_for_weight_norms(weight_perturbations: tuple[tf.Variable, ...]) -> tuple[tf.Variable, ...]:
-    return tuple(
-        tf.Variable(
-            tf.norm(perturbation), trainable=False
-        )
-        for perturbation in weight_perturbations
-    )
-
-
-def select_default_trained_layers_tf(classifier: tf.keras.Model) -> tuple[bool, ...]:
-    return tuple('kernel' in variable.name for variable in classifier.trainable_variables)
+    def _validation_metrics(self, x, y, x_adv) -> tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor]:
+        logits_clean = self._classifier(x, training=False)
+        loss_on_clean_examples = self._classifier.loss(y_true=y, y_pred=logits_clean)
+        logits_adv = self._classifier(x_adv, training=False)
+        loss_on_adversarial_examples = self._classifier.loss(y_true=y, y_pred=logits_adv)
+        return loss_on_clean_examples, logits_clean, loss_on_adversarial_examples, logits_adv
