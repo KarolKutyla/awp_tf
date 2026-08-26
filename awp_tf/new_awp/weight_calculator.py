@@ -73,7 +73,7 @@ class WeightCalculator:
 
             grad_sign = tf.sign(gradient)
             grad_alt_sign = tf.sign(gradient_alt)
-            grad_same_sign = grad_sign == grad_alt_sign | (gradient == 0) | (gradient_alt == 0)
+            grad_same_sign = (grad_sign == grad_alt_sign) | (gradient == 0) | (gradient_alt == 0)
             grad_abs = tf.abs(gradient)
             grad_alt_abs = tf.abs(gradient_alt)
 
