@@ -7,8 +7,8 @@ from tensorflow import keras
 class AWPParams:
 
     steps: int = 1
-    step_size: float = 1.e-2
-    perturbation_size_constraint: float = 1.e-2
+    step_size: float = 1e-2
+    perturbation_size_constraint: float = 1e-2
 
     alternate_iterations: int = 1
 
