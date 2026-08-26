@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 
-from awp_tf.reinforced_awp.batch_processor import BatchProcessor, AWPParams
+from awp_tf.new_awp.batch_processor import BatchProcessor, AWPParams
 from awp_tf.attacks.attack import TensorflowEvasionAttack
 from awp_tf.callbacks.progbar_logger import ProgbarLogger
 from awp_tf.callbacks.checkpoint_callback import EpochCheckpoint
