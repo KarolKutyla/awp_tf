@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
 
 import tensorflow as tf
-from awp_tf.losses.loss_context import LossContext
+from tensorflow import keras
 
 
 class AdversarialLoss(ABC):
     @abstractmethod
-    def calculate(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model, training: bool = False) -> tf.Tensor:
+    def calculate(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model: keras.Model, training: bool = False) -> tf.Tensor:
         pass
 
     @abstractmethod
-    def calculate_attack_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model, training: bool = False):
+    def calculate_attack_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model: keras.Model, training: bool = False):
         pass

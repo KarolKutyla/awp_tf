@@ -51,8 +51,6 @@ class Trainer(ABC):
             batch_size: int = 128,
             nb_epochs: int = 1,
             callbacks: list[Callback] | None = None,
-            enable_adversarial = True,
-            **kwargs
     ):
         train_dataset = (
             tf.data.Dataset.from_tensor_slices((x, y))
@@ -69,7 +67,7 @@ class Trainer(ABC):
                 .prefetch(tf.data.AUTOTUNE)
             )
 
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
 
 
     def fit_dataset(
@@ -78,11 +76,9 @@ class Trainer(ABC):
             validation_dataset: tf.data.Dataset | None = None,
             nb_epochs: int = 1,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            enable_adversarial = True,
-            **kwargs
     ):
         self._steps_per_epoch = train_dataset.cardinality().numpy() or None
-        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
+        self._train_loop(train_dataset, nb_epochs, callbacks=callbacks, validation_dataset=validation_dataset)
 
 
     def _train_loop(
@@ -91,7 +87,6 @@ class Trainer(ABC):
             nb_epochs,
             validation_dataset: tf.data.Dataset | None = None,
             callbacks: list[tf.keras.callbacks.Callback] | None = None,
-            enable_adversarial=True,
     ):
         callbacks = callbacks or []
         self._logger = ProgbarLogger()
@@ -101,12 +96,12 @@ class Trainer(ABC):
         self._callback_list.on_train_begin()
 
         for epoch in range(nb_epochs):
-            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset, enable_adversarial=enable_adversarial)
+            self._epoch(train_dataset, epoch + 1, validation_dataset=validation_dataset)
 
         self._callback_list.on_train_end()
 
 
-    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, enable_adversarial=True):
+    def _epoch(self, train_dataset: tf.data.Dataset, epoch: int, validation_dataset: tf.data.Dataset | None = None, ):
         self._reset_metrics()
 
         self._progbar = tf.keras.utils.Progbar(
