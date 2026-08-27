@@ -4,6 +4,7 @@ from abc import ABC, abstractmethod
 import time
 
 import tensorflow as tf
+from tensorflow import keras
 from tensorflow.keras.callbacks import Callback
 
 from awp_tf.attacks.attack import EvasionAttack
@@ -38,6 +39,8 @@ class Trainer(ABC):
         self._clean_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
         self._robust_loss_metric = tf.keras.metrics.Mean()
         self._robust_accuracy_metric = tf.keras.metrics.SparseCategoricalAccuracy()
+
+        _validate_optimizer(classifier)
 
 
     def fit(
@@ -186,3 +189,12 @@ class Trainer(ABC):
         self._clean_accuracy_metric.reset_state()
         self._robust_loss_metric.reset_state()
         self._robust_accuracy_metric.reset_state()
+
+
+def _validate_optimizer(classifier: keras.models.Model):
+    if classifier.optimizer is None:
+        raise Exception(
+            "No optimizer provided for the classifier. For native awp compile your model with SGD with custom learning rate and 0.0 momentum.")
+
+    if not classifier.optimizer.built:
+        classifier.optimizer.build(classifier.trainable_variables)
