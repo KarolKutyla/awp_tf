@@ -3,11 +3,20 @@ import tensorflow as tf
 from awp_tf.trainers import trainer
 from awp_tf.api import multidistribution_awp, layer_scales_selector
 from awp_tf.api.awp_params import AWPParams
+from awp_tf.attacks.attack import EvasionAttack
+from awp_tf.losses.loss import AdversarialLoss
 
 class Trainer(trainer.Trainer):
 
-    def __init__(self, layer_scales: tuple[float, ...] | None = None, awp_params=AWPParams(),  *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(
+            self,
+            classifier: tf.keras.Model,
+            attack: EvasionAttack,
+            adversarial_loss: AdversarialLoss,
+            layer_scales: tuple[float, ...] | None = None,
+            awp_params=AWPParams(),
+    ):
+        super().__init__(classifier, attack, adversarial_loss)
         ls = layer_scales
         if ls is None:
             ls = layer_scales_selector.select_evenly(self._classifier)
