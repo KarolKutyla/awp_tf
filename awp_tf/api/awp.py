@@ -26,7 +26,7 @@ class AWP:
 
 
     @tf.function(jit_compile=True)
-    def process_batch(
+    def batch_process(
             self,
             x_batch: tf.Tensor,
             y_batch: tf.Tensor

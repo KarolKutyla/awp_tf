@@ -1,7 +1,7 @@
 import tensorflow as tf
 
 from awp_tf.trainers import trainer
-from awp_tf.api import awp, layer_scales_selector
+from awp_tf.api import multibatch_awp, layer_scales_selector
 from awp_tf.api.awp_params import AWPParams
 from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.losses.loss import AdversarialLoss
@@ -20,7 +20,7 @@ class Trainer(trainer.Trainer):
         ls = layer_scales
         if ls is None:
             ls = layer_scales_selector.select_evenly(self._classifier)
-        self._batch_processor = awp.AWP(self._classifier, self._robust_loss, self._attack, ls, awp_params)
+        self._batch_processor = multibatch_awp.AWP(self._classifier, self._robust_loss, self._attack, ls, awp_params)
 
     def _train_batches(self, dataset):
         train_iter = iter(dataset)
