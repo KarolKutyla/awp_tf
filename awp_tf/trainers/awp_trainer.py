@@ -24,14 +24,13 @@ class Trainer(trainer.Trainer):
 
     def _train_batches(self, dataset):
         train_iter = iter(dataset)
-        alt_iter = iter(dataset)
-        for step, ((x_batch, y_batch), (x_batch_alt, y_batch_alt)) in enumerate(zip(train_iter, alt_iter)):
-            self._run_batch(x_batch, y_batch, x_batch_alt, y_batch_alt, step + 1)
+        for step, (x_batch, y_batch) in enumerate(train_iter):
+            self._run_batch(x_batch, y_batch, step + 1)
 
-    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, x_batch_alt: tf.Tensor, y_batch_alt: tf.Tensor, step: int):
+    def _run_batch(self, x_batch: tf.Tensor, y_batch: tf.Tensor, step: int):
         self._callback_list.on_batch_begin(step)
 
-        batch_results = self._batch_processor.batch_process(x_batch, y_batch, x_batch_alt, y_batch_alt)
+        batch_results = self._batch_processor.batch_process(x_batch, y_batch)
         self._update_metrics(y_batch, batch_results)
 
         self._callback_list.on_batch_end(step, self._collect_train_logs())
