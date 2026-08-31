@@ -5,7 +5,7 @@ from awp_tf.api.awp_params import AWPParams
 from awp_tf.losses.loss import AdversarialLoss
 from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.api.awp_operations import Calculator
-
+from awp_tf.attacks.norm_and_std.normalized_pgd import PGDAttack, PGDParams
 
 class AWP:
     def __init__(
@@ -13,12 +13,14 @@ class AWP:
             classifier: keras.Model,
             robust_loss:AdversarialLoss,
             attack: EvasionAttack,
+            attack_alt: EvasionAttack,
             used_layers: tuple[float, ...],
             awp_params: AWPParams = AWPParams()
     ):
         self._classifier = classifier
         self._robust_loss = robust_loss
         self._attack = attack
+        self._alt_attack = attack_alt
         self._calculator = Calculator(self._classifier, used_layers, awp_params)
 
         self._alternate_iteration = awp_params.alternate_iterations
@@ -42,7 +44,7 @@ class AWP:
         for iteration in range(self._alternate_iteration):
             if iteration > 0:
                 x_batch_adv = self._attack.generate(x_batch, y_batch)
-            x_batch_adv_alt = self._attack.generate(x_batch_alt, y_batch_alt)
+            x_batch_adv_alt = self._alt_attack.generate(x_batch_alt, y_batch_alt)
             for step in range(self._awp_steps):
                 gradients = self._calculate_gradient_for_perturbation(x_batch, y_batch, x_batch_adv)
                 alternate_distribution_gradients = self._calculate_gradient_for_perturbation(x_batch_alt, y_batch_alt, x_batch_adv_alt)

@@ -92,7 +92,7 @@ class WeightCalculator:
                 logits_clean=logits_clean,
                 logits_adv=logits_adv
             )
-            loss = self._loss.calculate(ctx)
+            loss = self._loss.calculate_weight_perturbation_loss(ctx)
         selected_variables = tuple(
             self._classifier.trainable_variables[idx]
             for idx in self._indices_of_selected_layers

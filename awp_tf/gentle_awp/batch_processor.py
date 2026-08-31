@@ -77,14 +77,14 @@ class BatchProcessor:
         x_adv = self._attack.generate(x_batch, y_batch)
         ctx = self._calc_non_training_loss_context(x_batch, y_batch, x_adv)
         clean_loss = self._clean_loss(y_batch, ctx.logits_clean)
-        robust_loss = self._robust_loss.calculate(ctx)
+        robust_loss = self._robust_loss.calculate_weight_perturbation_loss(ctx)
         return clean_loss, ctx.logits_clean, robust_loss, ctx.logits_adv
 
 
     def _update_model_adversarial(self, x, y, x_adv):
         with tf.GradientTape() as tape:
             ctx = self._calc_training_loss_context(x, y, x_adv)
-            robust_loss = self._robust_loss.calculate(ctx)
+            robust_loss = self._robust_loss.calculate_weight_perturbation_loss(ctx)
         gradient = tape.gradient(robust_loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply(gradient)
         return robust_loss, ctx

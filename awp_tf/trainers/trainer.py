@@ -19,12 +19,14 @@ class Trainer(ABC):
             self,
             classifier: tf.keras.Model,
             attack: EvasionAttack,
-            adversarial_loss: AdversarialLoss
+            adversarial_loss: AdversarialLoss,
+            validation_attack: EvasionAttack | None = None
     ):
         self._fast_mode = True
 
         self._classifier: tf.keras.Model = classifier
         self._attack: EvasionAttack = attack
+        self._validation_attack = validation_attack or attack
         self._robust_loss: AdversarialLoss = adversarial_loss
 
         self._steps_per_epoch: int | None = None
@@ -163,7 +165,7 @@ class Trainer(ABC):
 
     @tf.function(jit_compile=True)
     def _validation(self, x_batch, y_batch):
-        x_batch_adv = self._attack.generate(x_batch, y_batch)
+        x_batch_adv = self._validation_attack.generate(x_batch, y_batch)
         logits_clean = self._classifier(x_batch, training=False)
         loss_on_clean_examples = self._classifier.loss(y_true=y_batch, y_pred=logits_clean)
         logits_adv = self._classifier(x_batch_adv, training=False)

@@ -73,7 +73,7 @@ class WeightCalculator:
     def _calculate_weight_perturbation_body(self, i, ctx: LossContext):
         with tf.GradientTape() as tape:
             ctx = ctx._replace(logits_clean=self._classifier(ctx.x_batch, training=False), logits_adv=self._classifier(ctx.x_adv, training=False))
-            loss = self._loss.calculate(ctx)
+            loss = self._loss.calculate_weight_perturbation_loss(ctx)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
 
         for idx in self._indices_of_selected_layers:

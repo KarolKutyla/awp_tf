@@ -9,4 +9,5 @@ class EvasionAttack(ABC):
 
     @abstractmethod
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
-        ...
+        pass
+

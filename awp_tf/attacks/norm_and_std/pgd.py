@@ -33,7 +33,6 @@ class PGDAttack(EvasionAttack):
         self._norm = self._params.norm
 
 
-    # @tf.function(reduce_retracing=True)
     def generate(self, x_batch: tf.Tensor, y_batch: tf.Tensor) -> tf.Tensor:
         if self._norm == "linf":
             return self._generate_inf(x_batch, y_batch)

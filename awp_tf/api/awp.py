@@ -58,13 +58,13 @@ class AWP:
             for idx in self._calculator.get_applied_layers_indices()
         )
         with tf.GradientTape() as tape:
-            loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=False)
+            loss = self._robust_loss.calculate_weight_perturbation_loss(x, y, x_adv, self._classifier, training=False)
         return tape.gradient(loss, selected_variables, unconnected_gradients=tf.UnconnectedGradients.ZERO)
 
 
     def _calculate_gradient_for_update(self, x, y, x_adv):
         with tf.GradientTape() as tape:
-            robust_loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=True)
+            robust_loss = self._robust_loss.calculate_weight_perturbation_loss(x, y, x_adv, self._classifier, training=True)
         return tape.gradient(robust_loss, self._classifier.trainable_variables)
 
 

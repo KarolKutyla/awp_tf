@@ -1,9 +1,13 @@
 import tensorflow as tf
+from keras._tf_keras import keras
 
 from awp_tf.losses.loss import AdversarialLoss
-from awp_tf.losses.loss_context import LossContext
+
+
 
 class TradesLoss(AdversarialLoss):
+
+
     def __init__(self, regularization_parameter: float = 1.0):
         super().__init__()
         if regularization_parameter < 0.0:
@@ -13,29 +17,42 @@ class TradesLoss(AdversarialLoss):
         self._sparse_categorical_cross_entropy = tf.losses.SparseCategoricalCrossentropy(from_logits=True)
 
 
-    def calculate(self, x, y , x_adv, model, training: bool = False) -> tf.Tensor:
-        batch_size = tf.shape(x)[0]
-        xx = tf.concat([x, x_adv], axis=0)
-        logits = model(xx, training=training)
-        logits_clean = logits[:batch_size]
-        logits_adv = logits[batch_size:]
+    def calculate_gradient_step_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model: keras.Model) -> tf.Tensor:
+        logits_clean, logits_adv = _single_forward_pass(x, y, x_adv, model, training=True)
 
         loss_clean = self._sparse_categorical_cross_entropy(y, logits_clean)
         loss_kl = _kld_loss(logits_clean, logits_adv)
         loss = loss_clean + loss_kl * self._regularization_parameter
+
         return loss / self._mean_factor
 
 
-    def calculate_attack_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model, training: bool = False):
-        batch_size = tf.shape(x)[0]
-        xx = tf.concat([x, x_adv], axis=0)
-        logits = model(xx, training=training)
-        logits_clean = logits[:batch_size]
-        logits_adv = logits[batch_size:]
-        return _kld_loss(logits_clean, logits_adv)
+    def calculate_weight_perturbation_loss(self, x, y, x_adv, model, training: bool = False) -> tf.Tensor:
+        logits_clean, logits_adv = _single_forward_pass(x, y, x_adv, model, training=False)
+
+        loss_clean = self._sparse_categorical_cross_entropy(y, logits_clean)
+        loss_kl = _kld_loss(logits_clean, logits_adv)
+        loss = loss_clean + loss_kl * self._regularization_parameter
+
+        return loss / self._mean_factor
 
 
-def _kld_loss(logits, logits_adv):
+    def calculate_attack_loss(self, x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model):
+        logits_clean, logits_adv = _single_forward_pass(x, y, x_adv, model, training=False)
+        loss = _kld_loss(logits_clean, logits_adv)
+        return loss
+
+
+
+def _single_forward_pass(x: tf.Tensor, y: tf.Tensor, x_adv: tf.Tensor, model, training: bool):
+    batch_size = tf.shape(x)[0]
+    xx = tf.concat([x, x_adv], axis=0)
+    logits = model(xx, training=training)
+    logits_clean = logits[:batch_size]
+    logits_adv = logits[batch_size:]
+    return logits_clean, logits_adv
+
+def _kld_loss(logits, logits_adv) -> tf.Tensor:
     p = tf.nn.softmax(logits)
     log_p = tf.nn.log_softmax(logits)
     log_q = tf.nn.log_softmax(logits_adv)

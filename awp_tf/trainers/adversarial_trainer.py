@@ -20,7 +20,7 @@ class Trainer(trainer.Trainer):
         x_adv = self._attack.generate(x, y)
         validation_metrics = self._validation_metrics(x, y, x_adv)
         with tf.GradientTape() as tape:
-            loss = self._robust_loss.calculate(x, y, x_adv, self._classifier, training=True)
+            loss = self._robust_loss.calculate_weight_perturbation_loss(x, y, x_adv, self._classifier, training=True)
         gradient = tape.gradient(loss, self._classifier.trainable_variables)
         self._classifier.optimizer.apply_gradients(zip(gradient, self._classifier.trainable_variables))
         return validation_metrics
