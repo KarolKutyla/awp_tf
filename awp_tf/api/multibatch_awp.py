@@ -68,7 +68,7 @@ class AWP:
 
     def _calculate_gradient_for_update(self, x, y, x_adv):
         with tf.GradientTape() as tape:
-            robust_loss = self._robust_loss.calculate_weight_perturbation_loss(x, y, x_adv, self._classifier, training=True)
+            robust_loss = self._robust_loss.calculate_gradient_step_loss(x, y, x_adv, self._classifier)
         return tape.gradient(robust_loss, self._classifier.trainable_variables)
 
 

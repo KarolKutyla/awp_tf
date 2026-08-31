@@ -5,7 +5,6 @@ from awp_tf.api.awp_params import AWPParams
 from awp_tf.losses.loss import AdversarialLoss
 from awp_tf.attacks.attack import EvasionAttack
 from awp_tf.api.awp_operations import Calculator
-from awp_tf.attacks.norm_and_std.normalized_pgd import PGDAttack, PGDParams
 
 class AWP:
     def __init__(
@@ -70,7 +69,7 @@ class AWP:
 
     def _calculate_gradient_for_update(self, x, y, x_adv):
         with tf.GradientTape() as tape:
-            robust_loss = self._robust_loss.calculate_weight_perturbation_loss(x, y, x_adv, self._classifier, training=True)
+            robust_loss = self._robust_loss.calculate_gradient_step_loss(x, y, x_adv, self._classifier)
         return tape.gradient(robust_loss, self._classifier.trainable_variables)
 
 
