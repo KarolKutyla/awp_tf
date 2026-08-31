@@ -16,8 +16,9 @@ class Trainer(trainer.Trainer):
             adversarial_loss: AdversarialLoss,
             layer_scales: tuple[float, ...] | None = None,
             awp_params=AWPParams(),
+            validation_attack=None,
     ):
-        super().__init__(classifier, attack, adversarial_loss)
+        super().__init__(classifier, attack, adversarial_loss, validation_attack=validation_attack)
         ls = layer_scales
         if ls is None:
             ls = layer_scales_selector.select_evenly(self._classifier)
