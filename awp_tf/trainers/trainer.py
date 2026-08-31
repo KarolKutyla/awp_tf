@@ -161,6 +161,7 @@ class Trainer(ABC):
             batch_results = self._validation(x_batch, y_batch)
             self._update_metrics(y_batch, batch_results)
 
+    @tf.function(jit_compile=True)
     def _validation(self, x_batch, y_batch):
         x_batch_adv = self._attack.generate(x_batch, y_batch)
         logits_clean = self._classifier(x_batch, training=False)
