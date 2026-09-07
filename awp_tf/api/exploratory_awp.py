@@ -42,7 +42,7 @@ class AWP:
                 x_batch_adv = self._attack.generate(x_batch, y_batch)
             for step in range(self._awp_steps):
                 gradients = self._calculate_gradient_for_perturbation(x_batch, y_batch, x_batch_adv)
-                self._calculator.calculate_perturbation_for_steep_params(gradients)
+                self._calculator.calculate_random_perturbation_for_smooth_params(gradients)
                 self._calculator.apply_weight_perturbations(self._classifier)
 
         gradient = self._calculate_gradient_for_update(x_batch, y_batch, original_x_batch_adv)
