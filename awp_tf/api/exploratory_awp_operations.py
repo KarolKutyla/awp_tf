@@ -21,7 +21,7 @@ class Calculator:
         self._classifier = classifier
 
         self._max_step = tf.constant(0.1, dtype=self._data_dtype)
-        self._min_step = tf.constant(0.0, dtype=self._data_dtype)
+        self._min_step = tf.constant(0.001, dtype=self._data_dtype)
 
         self._layer_scales = layer_scales
         self._applied_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._layer_scales) if value != 0.0)
