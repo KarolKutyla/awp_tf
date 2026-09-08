@@ -20,6 +20,9 @@ class Calculator:
         self._learning_rate = classifier.optimizer.learning_rate
         self._classifier = classifier
 
+        self._max_step = tf.constant(0.1, dtype=self._data_dtype)
+        self._min_step = tf.constant(0.0, dtype=self._data_dtype)
+
         self._layer_scales = layer_scales
         self._applied_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._layer_scales) if value != 0.0)
         self._saved_weights: tuple[tf.Variable, ...] = _initiate_memory_for_weight_perturbations(classifier, self._applied_layers)
@@ -54,6 +57,8 @@ class Calculator:
         learning_rate = self._classifier.optimizer.learning_rate(
             self._classifier.optimizer.iterations
         )
+        learning_rate = tf.minimum(learning_rate, self._max_step)
+        learning_rate = tf.maximum(learning_rate, self._min_step)
 
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
