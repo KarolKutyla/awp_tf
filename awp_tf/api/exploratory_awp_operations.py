@@ -54,9 +54,7 @@ class Calculator:
             perturbation.assign(step)
 
     def calculate_lr_matching_weight_perturbation(self, gradients: tuple[tf.Tensor, ...]) -> None:
-        learning_rate = self._classifier.optimizer.learning_rate(
-            self._classifier.optimizer.iterations
-        )
+        learning_rate = self._classifier.optimizer.learning_rate
         learning_rate = tf.minimum(learning_rate, self._max_step)
         learning_rate = tf.maximum(learning_rate, self._min_step)
 
