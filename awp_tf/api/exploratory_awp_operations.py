@@ -59,7 +59,7 @@ class Calculator:
     def calculate_random_perturbation_that_match_gradient_sign(self, gradients: tuple[tf.Tensor, ...]) -> None:
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             random_perturbation = tf.random.normal(shape=gradient.shape)
-            random_perturbation_correct_direction = tf.norm(random_perturbation) * tf.sign(gradient)
+            random_perturbation_correct_direction = tf.abs(random_perturbation) * tf.sign(gradient)
             random_direction = tf.math.divide_no_nan(random_perturbation_correct_direction, tf.norm(random_perturbation_correct_direction))
             step = random_direction * norm * self._layer_scales[idx] * self._step_size
             perturbation.assign(step)
