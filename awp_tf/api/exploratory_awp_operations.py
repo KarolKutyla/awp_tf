@@ -125,12 +125,73 @@ class Calculator:
         return self._applied_layers
 
 
-    def calculate_random_multi_batch_perturbation_for_single_steep_params(self, gradients: tuple[tf.Tensor, ...]) -> None:
-        ...
+    def calculate_random_multi_batch_perturbation_for_single_steep_params(self, gradients: tuple[tf.Tensor, ...], gradients_alt: tuple[tf.Tensor, ...]) -> None:
+        for idx, gradient, gradient_alt, perturbation, norm in zip(
+                self._applied_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms
+        ):
+            gradient_norm = tf.abs(gradient)
+            gradient_norm_avg = tf.reduce_mean(gradient_norm)
+            steep_params_mask = tf.cast(
+                gradient_norm > gradient_norm_avg,
+                gradient.dtype,
+            )
+
+            gradient_alt_norm = tf.abs(gradient_alt)
+            gradient_alt_norm_avg = tf.reduce_mean(gradient_alt_norm)
+            alt_steep_params_mask = tf.cast(
+                gradient_alt_norm > gradient_alt_norm_avg,
+                gradient_alt.dtype,
+            )
+
+            same_sign_mask = tf.cast(
+                tf.sign(gradient) == tf.sign(gradient_alt),
+                gradient.dtype,
+            )
+            single_steep_mask = same_sign_mask & (steep_params_mask | alt_steep_params_mask)
+
+            random_values = tf.random.normal(shape=gradient.shape)
+            random_values_matching_gradient_signs = tf.abs(random_values) * tf.sign(gradient)
+
+            random_steep_values = random_values_matching_gradient_signs * single_steep_mask
+            perturbation_direction = tf.math.divide_no_nan(random_steep_values, tf.norm(random_steep_values))
+            step = perturbation_direction * norm * self._layer_scales[idx] * self._step_size
+
+            perturbation.assign(step)
 
 
-    def calculate_random_multi_batch_perturbation_for_double_steep_params(self, gradients: tuple[tf.Tensor, ...]) -> None:
-        ...
+
+    def calculate_random_multi_batch_perturbation_for_double_steep_params(self, gradients: tuple[tf.Tensor, ...], gradients_alt: tuple[tf.Tensor, ...]) -> None:
+        for idx, gradient, gradient_alt, perturbation, norm in zip(
+                self._applied_layers, gradients, gradients_alt, self._weight_perturbations, self._weight_norms
+        ):
+            gradient_norm = tf.abs(gradient)
+            gradient_norm_avg = tf.reduce_mean(gradient_norm)
+            steep_params_mask = tf.cast(
+                gradient_norm > gradient_norm_avg,
+                gradient.dtype,
+            )
+
+            gradient_alt_norm = tf.abs(gradient_alt)
+            gradient_alt_norm_avg = tf.reduce_mean(gradient_alt_norm)
+            alt_steep_params_mask = tf.cast(
+                gradient_alt_norm > gradient_alt_norm_avg,
+                gradient_alt.dtype,
+            )
+
+            same_sign_mask = tf.cast(
+                tf.sign(gradient) == tf.sign(gradient_alt),
+                gradient.dtype,
+            )
+            double_steep_mask = same_sign_mask & steep_params_mask & alt_steep_params_mask
+
+            random_values = tf.random.normal(shape=gradient.shape)
+            random_values_matching_gradient_signs = tf.abs(random_values) * tf.sign(gradient)
+
+            random_steep_values = random_values_matching_gradient_signs * double_steep_mask
+            perturbation_direction = tf.math.divide_no_nan(random_steep_values, tf.norm(random_steep_values))
+            step = perturbation_direction * norm * self._layer_scales[idx] * self._step_size
+
+            perturbation.assign(step)
 
 
 
