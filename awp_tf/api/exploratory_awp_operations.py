@@ -17,6 +17,8 @@ class Calculator:
         self._step_size: tf.Tensor = tf.cast(params.step_size, dtype=self._data_dtype)
         self._perturbation_size_constraint: tf.Tensor = tf.cast(params.perturbation_size_constraint, dtype=self._data_dtype)
         self._alternate_distribution_tradeoff: tf.Tensor = tf.cast(params.alternate_distribution_tradeoff, dtype=self._data_dtype)
+        self._learning_rate = classifier.optimizer.learning_rate
+        self._classifier = classifier
 
         self._layer_scales = layer_scales
         self._applied_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._layer_scales) if value != 0.0)
@@ -45,7 +47,7 @@ class Calculator:
     def calculate_weight_perturbation(self, gradients: tuple[tf.Tensor, ...]) -> None:
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
-            step = step_direction * norm * self._layer_scales[idx] * self._step_size
+            step = step_direction * norm * self._layer_scales[idx] * self._classifier.optimizer.learning_rate
             perturbation.assign(step)
 
 
@@ -53,7 +55,7 @@ class Calculator:
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             random_perturbation = tf.random.normal(shape=gradient.shape)
             random_direction = tf.math.divide_no_nan(random_perturbation, tf.norm(random_perturbation))
-            step = random_direction * norm * self._layer_scales[idx] * self._step_size
+            step = random_direction * norm * self._layer_scales[idx] * self._classifier.optimizer.learning_rate
             perturbation.assign(step)
 
     def calculate_random_perturbation_that_match_gradient_sign(self, gradients: tuple[tf.Tensor, ...]) -> None:
@@ -61,7 +63,7 @@ class Calculator:
             random_perturbation = tf.random.normal(shape=gradient.shape)
             random_perturbation_correct_direction = tf.abs(random_perturbation) * tf.sign(gradient)
             random_direction = tf.math.divide_no_nan(random_perturbation_correct_direction, tf.norm(random_perturbation_correct_direction))
-            step = random_direction * norm * self._layer_scales[idx] * self._step_size
+            step = random_direction * norm * self._layer_scales[idx] * self._classifier.optimizer.learning_rate
             perturbation.assign(step)
 
     def calculate_random_perturbation_for_smooth_params(self, gradients: tuple[tf.Tensor, ...]) -> None:
@@ -80,7 +82,7 @@ class Calculator:
 
             random_smooth_values = random_values_matching_gradient_signs * smooth_params_mask
             perturbation_direction = tf.math.divide_no_nan(random_smooth_values, tf.norm(random_smooth_values))
-            step = perturbation_direction * norm * self._layer_scales[idx] * self._step_size
+            step = perturbation_direction * norm * self._layer_scales[idx] * self._classifier.optimizer.learning_rate
 
             perturbation.assign(step)
 
@@ -101,7 +103,7 @@ class Calculator:
 
             random_steep_values = random_values_matching_gradient_signs * steep_params_mask
             perturbation_direction = tf.math.divide_no_nan(random_steep_values, tf.norm(random_steep_values))
-            step = perturbation_direction * norm * self._layer_scales[idx] * self._step_size
+            step = perturbation_direction * norm * self._layer_scales[idx] * self._classifier.optimizer.learning_rate
 
             perturbation.assign(step)
 
