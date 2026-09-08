@@ -18,7 +18,7 @@ class Calculator:
         self._perturbation_size_constraint: tf.Tensor = tf.cast(params.perturbation_size_constraint, dtype=self._data_dtype)
         self._alternate_distribution_tradeoff: tf.Tensor = tf.cast(params.alternate_distribution_tradeoff, dtype=self._data_dtype)
         self._learning_rate = classifier.optimizer.learning_rate
-        # self._classifier = classifier
+        self._classifier = classifier
 
         self._layer_scales = layer_scales
         self._applied_layers: tuple[int, ...] = tuple(i for i, value in enumerate(self._layer_scales) if value != 0.0)
@@ -48,6 +48,13 @@ class Calculator:
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
             step = step_direction * norm * self._layer_scales[idx] * self._step_size
+            perturbation.assign(step)
+
+    def calculate_lr_matching_weight_perturbation(self, gradients: tuple[tf.Tensor, ...]) -> None:
+        learning_rate = self._classifier.optimizer.learning_rate
+        for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
+            step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
+            step = step_direction * norm * self._layer_scales[idx] * learning_rate
             perturbation.assign(step)
 
 
