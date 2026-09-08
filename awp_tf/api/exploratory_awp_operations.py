@@ -51,7 +51,10 @@ class Calculator:
             perturbation.assign(step)
 
     def calculate_lr_matching_weight_perturbation(self, gradients: tuple[tf.Tensor, ...]) -> None:
-        learning_rate = self._classifier.optimizer.learning_rate
+        learning_rate = self._classifier.optimizer.learning_rate(
+            self._classifier.optimizer.iterations
+        )
+
         for idx, gradient, perturbation, norm in zip(self._applied_layers, gradients, self._weight_perturbations, self._weight_norms):
             step_direction = tf.math.divide_no_nan(gradient, tf.norm(gradient))
             step = step_direction * norm * self._layer_scales[idx] * learning_rate
